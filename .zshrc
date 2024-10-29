@@ -18,10 +18,14 @@ source $ZSH/oh-my-zsh.sh
 
 # User configuration
 
+# Update the screenshots location and a couple of other tweaks
 source $HOME/.macosdefaults.sh
 
 # load sensitive credentials from a local file
 source $HOME/.credentials
+
+# Load some handy shortcuts
+source $HOME/.shortcuts
 
 # carwow-specific shortcuts
 source $HOME/.carwow-shortcuts.sh
@@ -51,12 +55,10 @@ eval $(thefuck --alias)
 # stop homebrew auto-updating all the time
 export HOMEBREW_NO_AUTO_UPDATE=1
 
-# this should probably be the last line
-export path
-
 # To customize prompt, run `p10k configure` or edit ~/.p10k.zsh.
 [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
+# LLM nonsense
 # >>> conda initialize >>>
 # !! Contents within this block are managed by 'conda init' !!
 __conda_setup="$('/opt/homebrew/Caskroom/miniconda/base/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
@@ -75,4 +77,5 @@ unset __conda_setup
 # PATH_TO_CKPT="~/projects/bfirsh:stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt"
 # ln -s "$PATH_TO_CKPT/sd-v1-4.ckpt" ~/projects/stable-diffusion/models/ldm/stable-diffusion-v1/model.ckpt
 
+# END LLM NONSENSE
 export path

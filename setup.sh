@@ -30,3 +30,4 @@ ln -s $HOME/dotfiles/.gitmessage.txt $HOME/.gitmessage.txt
 ln -s $HOME/dotfiles/.gitignore_global $HOME/.gitignore_global
 ln -s $HOME/dotfiles/.macosdefaults.sh $HOME/.macosdefaults.sh
 ln -s $HOME/dotfiles/Brewfile $HOME/Brewfile
+ln -s $HOME/dotfiles/.shortcuts $HOME/.shortcuts

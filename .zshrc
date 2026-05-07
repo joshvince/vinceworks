@@ -26,6 +26,7 @@ source $HOME/.credentials
 
 # Load some handy shortcuts
 source $HOME/.shortcuts
+[[ -f $HOME/.shortcuts.private ]] && source $HOME/.shortcuts.private
 
 # carwow-specific shortcuts
 source $HOME/.carwow-shortcuts.sh
@@ -36,10 +37,6 @@ PATH="$(brew --prefix)/opt/gnu-sed/libexec/gnubin:$PATH"
 PATH=$PATH:$HOME/projects/carwow/dev-environment/bin
 
 
-# languages
-source /opt/homebrew/opt/chruby/share/chruby/chruby.sh
-source /opt/homebrew/opt/chruby/share/chruby/auto.sh
-
 # . /usr/local/opt/asdf/etc/bash_completion.d/asdf.bash
 # . /usr/local/opt/asdf/asdf.sh
 
@@ -48,6 +45,8 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
 
 export NODE_OPTIONS="--max-old-space-size=8192"
+
+export PATH=$PATH:~/go/bin
 
 # thefuck shell plugin
 eval $(thefuck --alias)
@@ -79,3 +78,9 @@ unset __conda_setup
 
 # END LLM NONSENSE
 export path
+export PATH="$HOME/.local/bin:$PATH"
+
+eval "$(rbenv init - zsh)"
+
+# opencode
+export PATH=/Users/joshvince/.opencode/bin:$PATH

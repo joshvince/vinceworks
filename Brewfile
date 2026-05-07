@@ -20,9 +20,8 @@ brew install "kubernetes-cli"
 brew install "postgresql", restart_service: true
 brew install "postgis"
 brew install "rbenv"
+brew install "ruby-build"
 brew install "redis", restart_service: true
 brew install "yarn"
 cask install "ngrok"
 brew install "thefuck"
-brew install "ruby-install"
-brew install "chruby"

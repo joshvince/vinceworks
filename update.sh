@@ -46,4 +46,17 @@ link "$HOME/vinceworks/Brewfile"          "$HOME/Brewfile"
 link "$HOME/vinceworks/.shortcuts"        "$HOME/.shortcuts"
 link "$HOME/vinceworks/.shortcuts.private" "$HOME/.shortcuts.private"
 
-print "\nDone. Run with --force to overwrite existing symlinks."
+# --- Fonts ---
+
+print "\nUpdating fonts..."
+for font in "$HOME/vinceworks/fonts/"*.otf; do
+  dest="$HOME/Library/Fonts/$(basename "$font")"
+  if [[ -f "$dest" ]] && ! $FORCE; then
+    print "  [skip]    $(basename "$font")"
+  else
+    cp "$font" "$HOME/Library/Fonts/"
+    print "  [installed] $(basename "$font")"
+  fi
+done
+
+print "\nDone. Run with --force to overwrite existing symlinks and fonts."

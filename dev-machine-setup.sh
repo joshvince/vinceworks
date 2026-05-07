@@ -91,5 +91,11 @@ ln -s "$HOME/vinceworks/.shortcuts.private" "$HOME/.shortcuts.private"
 
 print "  [linked]  dotfiles"
 
+# --- Fonts ---
+
+print "\nInstalling fonts..."
+cp "$HOME/vinceworks/fonts/"*.otf "$HOME/Library/Fonts/"
+print "  [installed] Monaspace fonts"
+
 print "\nDone. Open a new shell to load your config."
 print "Run 'p10k configure' to set up your prompt theme."

@@ -1,4 +1,4 @@
-# vinceworks
+# Vinceworks
 
 Personal dotfiles and tooling, managed via symlinks so changes sync across machines through git.
 
@@ -28,7 +28,7 @@ vinceworks:update --force   # also overwrite existing symlinks
 ---
 
 ### `vinceworks:ai`
-**Run once per machine** to set up AI tooling. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/` so they're available globally across all projects.
+Sets up AI tooling and syncs agents. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/` so they're available globally across all projects. Re-run whenever you add a new agent.
 
 ```sh
 vinceworks:ai

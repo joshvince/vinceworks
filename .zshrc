@@ -29,7 +29,7 @@ source $HOME/.shortcuts
 [[ -f $HOME/.shortcuts.private ]] && source $HOME/.shortcuts.private
 
 # carwow-specific shortcuts
-source $HOME/.carwow-shortcuts.sh
+[[ -f $HOME/.carwow-shortcuts.sh ]] && source $HOME/.carwow-shortcuts.sh
 
 PATH="$(brew --prefix)/opt/coreutils/libexec/gnubin:$PATH"
 PATH="$(brew --prefix)/opt/findutils/libexec/gnubin:$PATH"
@@ -80,7 +80,7 @@ unset __conda_setup
 export path
 export PATH="$HOME/.local/bin:$PATH"
 
-eval "$(rbenv init - zsh)"
+[[ -f rbenv ]] && eval "$(rbenv init - zsh)"
 
 # opencode
 export PATH=/Users/joshvince/.opencode/bin:$PATH

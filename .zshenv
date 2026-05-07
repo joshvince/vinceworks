@@ -1,2 +1,2 @@
 eval "$(/opt/homebrew/bin/brew shellenv)"
-eval "$(rbenv init - zsh)"
+command -v rbenv >/dev/null && eval "$(rbenv init - zsh)"

@@ -1,3 +1,7 @@
 # Public shortcuts — checked into vinceworks
 # Put private/sensitive aliases in .shortcuts.private instead
 
+alias vinceworks:dev-machine-setup="$HOME/vinceworks/dev-machine-setup.sh"
+alias vinceworks:update="$HOME/vinceworks/update.sh"
+alias vinceworks:ai="$HOME/vinceworks/ai.sh"
+

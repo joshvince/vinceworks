@@ -2,21 +2,42 @@
 
 Personal dotfiles and tooling, managed via symlinks so changes sync across machines through git.
 
-## New machine setup
+## Commands
+
+### `vinceworks:dev-machine-setup`
+**Run once on a fresh machine.** Asks which terminal to install (iTerm2 or Ghostty), then installs Homebrew, all packages from the Brewfile, shell tools (oh-my-zsh, Powerlevel10k, nvm), and wires up all dotfiles as symlinks. On a brand new machine, run the script directly since the alias won't exist yet:
 
 ```sh
 git clone <this-repo> ~/vinceworks
 cd ~/vinceworks
-./setup.sh
+./dev-machine-setup.sh
 ```
 
-The script will first ask which terminal to install (iTerm2 or Ghostty), then work through the rest of the setup. It skips anything already installed and skips symlinks that already exist at the destination.
+After it completes, open a new shell and run `p10k configure` to set up your prompt theme.
 
-To reinstall apps and overwrite existing symlinks:
+---
+
+### `vinceworks:update`
+**Run on an existing machine** to pick up changes from the repo — installs any new Homebrew packages and creates symlinks for any new dotfiles. Skips anything already in place.
 
 ```sh
-./setup.sh --force
+vinceworks:update
+vinceworks:update --force   # also overwrite existing symlinks
 ```
+
+---
+
+### `vinceworks:ai`
+**Run once per machine** to set up AI tooling. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/` so they're available globally across all projects.
+
+```sh
+vinceworks:ai
+vinceworks:ai --force   # replace existing agents or wrong-target symlinks
+```
+
+To add a new shared agent, drop a `.md` file into `ai/agents/` and re-run `vinceworks:ai`.
+
+---
 
 ## What's managed
 
@@ -32,27 +53,3 @@ To reinstall apps and overwrite existing symlinks:
 ### Shortcuts
 
 `.shortcuts` is for shareable aliases. `.shortcuts.private` is for anything sensitive (server IPs, credentials, etc.) — it's gitignored and never leaves the machine. Both are sourced automatically by `.zshrc`.
-
-## AI agents (`ai/`)
-
-Shared agent definitions for Claude Code and OpenCode, defined once and symlinked into projects.
-
-### Defining agents
-
-Add `.md` files to `ai/agents/`. Each file is an agent definition in the format expected by Claude Code / OpenCode.
-
-### Linking agents into a project
-
-From any project directory:
-
-```sh
-link-agents
-```
-
-This creates symlinks in `.claude/agents/` and `.opencode/agents/` pointing back to the definitions here, and adds a `.gitignore` block so the symlinks aren't accidentally committed.
-
-```sh
-link-agents --force   # replace existing files or wrong-target symlinks
-```
-
-`link-agents` is safe to re-run — it skips anything already correct.

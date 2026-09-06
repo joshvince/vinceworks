@@ -1,2 +1,4 @@
 .solargraph.yml
 *.code-workspace
+
+**/.claude/settings.local.json

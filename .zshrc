@@ -80,7 +80,8 @@ unset __conda_setup
 export path
 export PATH="$HOME/.local/bin:$PATH"
 
-[[ -f rbenv ]] && eval "$(rbenv init - zsh)"
+command -v rbenv >/dev/null && eval "$(rbenv init - zsh)"
 
 # opencode
 export PATH=/Users/joshvince/.opencode/bin:$PATH
+ulimit -n 10240

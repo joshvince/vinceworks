@@ -1,5 +1,5 @@
 ---
-description: Pragmatic Ruby/Rails engineer for writing, refactoring, and implementing production code with human-in-the-loop collaboration.
+description: Pragmatic Ruby/Rails engineer for writing, refactoring, and implementing production code with human-in-the-loop collaboration on projects for the company 'carwow'.
 mode: primary
 color: "#22c55e"
 permission:

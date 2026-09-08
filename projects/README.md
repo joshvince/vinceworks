@@ -18,7 +18,7 @@ The production services already on the box (vincetagram as `postcard`, Filebrows
 - **tmux inside the container** holds your sessions. Detach and everything keeps running.
 - **Shared volumes:** `projects-mise` (Ruby, Node and Go installs plus gems, so a compiled Ruby is reused by every project), `projects-claude` (`~/.claude`, one login for all projects) and `projects-go`. Each project also gets `project-<name>-pg` for its database.
 - **Git works** because the host's `/home/josh/.ssh` is mounted read-only and the container user has the same uid as `josh`. No agent forwarding is involved.
-- **Connecting** is SSH to the host, then `docker exec` into the container and attach tmux. There is no sshd inside containers. Tailscale makes the host reachable from anywhere.
+- **Connecting** is SSH to the host, then `docker exec` into the container and attach tmux. There is no sshd inside containers. The box is reachable on the home LAN only for now; Tailscale is parked in `TODO.md`.
 
 ## Commands
 
@@ -115,15 +115,12 @@ On the box:
 
 1. `id josh` should report uid 1000. The build passes the real uid and gid as build args either way.
 2. `groups josh` should include `docker`.
-3. Install Tailscale: `curl -fsSL https://tailscale.com/install.sh | sh && sudo tailscale up`. Keep plain sshd; do not enable Tailscale SSH.
-4. `mkdir -p /home/josh/projects /home/josh/.projects` and clone vinceworks to `/home/josh/vinceworks`.
-5. Save the output of `ss -ltn` as the baseline of production ports.
+3. `mkdir -p /home/josh/projects /home/josh/.projects` and clone vinceworks to `/home/josh/vinceworks`.
+4. Save the output of `ss -ltn` as the baseline of production ports.
 
 On the Mac:
 
-6. `brew install --cask tailscale` and sign in to the same tailnet.
-7. Point `Host vince-archive` in `~/.ssh/config` at the Tailscale name, and add `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p`, `ControlPersist 10m` so repeated calls are instant.
-8. Confirm `ssh vince-archive hostname` works from outside the house.
+5. Add `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` under `Host vince-archive` in `~/.ssh/config` so repeated calls are instant.
 
 ## Gotchas
 
@@ -133,7 +130,7 @@ On the Mac:
 - If a named volume ends up root-owned: `docker run --rm -v projects-claude:/v alpine chown -R 1000:1000 /v`.
 - The `.ssh` mount is read-only, so `known_hosts` cannot be appended inside the container. Add new hosts on the box.
 - The box's git keys have passphrases. Load one with `keychain` on the box and `start` passes the agent socket into the container, so git over SSH needs no prompt. Without it, `new` with an SSH URL fails; pass an `https://` URL for public repos, and git inside the container asks for the passphrase on push.
-- Rails 7.1 and newer block unknown hostnames in development. The container sets `RAILS_DEVELOPMENT_HOSTS` to cover the Tailscale names.
+- Rails 7.1 and newer block unknown hostnames in development. The container sets `RAILS_DEVELOPMENT_HOSTS` to cover `vince-archive` and the box's hostname.
 - Two containers running `bundle install` for the same Ruby at the same time can race on the shared gem directory. Rerun if it happens.
 - tmux state does not survive a container restart. The entrypoint recreates the three windows; running processes are gone.
 - One Postgres per container is a dev-only model. Add sidecar containers to `start` if a project needs Redis or a pinned Postgres version.

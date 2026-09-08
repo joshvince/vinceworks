@@ -6,3 +6,4 @@ Ideas for later versions of the remote dev environments in `projects/`. Not comm
 - **pi as the coding harness.** Replace Claude Code inside the container with pi.
 - **opencode go as the model provider for pi.**
 - **speak-like-you-eat or nopus with pi.**
+- **Tailscale.** The box is only reachable on the home LAN today. Install Tailscale on the box and the Mac so `projects` works from anywhere, and point the `vince-archive` SSH alias at the Tailscale name.

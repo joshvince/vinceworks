@@ -196,6 +196,9 @@ cmd_start() {
 
   # Follow the entrypoint until it reports ready so the first Ruby compile is visible.
   docker logs -f "$container" 2>&1 | sed '/^projects: ready$/q'
+  if [[ "$(container_status "$name")" != running ]]; then
+    die "$container exited during start; see: docker logs $container"
+  fi
   log ok "$container ready at http://vince-archive:$PORT"
 }
 

@@ -4,6 +4,7 @@
 set -euo pipefail
 
 name=${PROJECT_NAME:?PROJECT_NAME is not set}
+user=$(id -un)
 project_dir="$HOME/projects/$name"
 secrets_dir="$HOME/.secrets"
 vinceworks="$HOME/vinceworks"
@@ -33,9 +34,9 @@ case ",${PROJECT_SERVICES:-}," in
   *,postgres,*)
     echo "Starting postgres..."
     sudo service postgresql start >/dev/null
-    if ! sudo -u postgres psql -tAc "select 1 from pg_roles where rolname = '$USER'" | grep -q 1; then
-      sudo -u postgres createuser -s "$USER"
-      log created "postgres role $USER"
+    if ! sudo -u postgres psql -tAc "select 1 from pg_roles where rolname = '$user'" | grep -q 1; then
+      sudo -u postgres createuser -s "$user"
+      log created "postgres role $user"
     fi
     log ok "postgres"
     ;;

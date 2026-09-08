@@ -93,16 +93,36 @@ detect_services() {
   echo "$services"
 }
 
-# If keychain has loaded a key on the host, pass its agent socket into the
-# container so git over SSH works without a passphrase prompt.
+# Guarantees a live ssh-agent on the box with the dedicated GitHub key loaded,
+# so a container only ever gets an agent socket and never the private key.
+ensure_agent() {
+  local key="$HOME/.ssh/projects_ed25519"
+  if [[ ! -f "$key" ]]; then
+    log warn "no $key; git over SSH will not work in containers"
+    return 0
+  fi
+  keychain --quiet --agents ssh "$key"
+  # shellcheck disable=SC1090
+  source "$HOME/.keychain/$(hostname)-sh"
+}
+
+# Passes the running ssh-agent's socket into the container so git over SSH
+# works without the private key ever entering it.
 agent_socket_args() {
-  local env_file="$HOME/.keychain/$(hostname)-sh" sock=""
-  if [[ -f "$env_file" ]]; then
-    sock=$(sed -n 's/^SSH_AUTH_SOCK=\([^;]*\);.*/\1/p' "$env_file")
+  local sock=${SSH_AUTH_SOCK:-}
+  if [[ -z "$sock" || ! -S "$sock" ]]; then
+    local env_file="$HOME/.keychain/$(hostname)-sh"
+    [[ -f "$env_file" ]] && sock=$(sed -n 's/^SSH_AUTH_SOCK=\([^;]*\);.*/\1/p' "$env_file")
   fi
   if [[ -n "$sock" && -S "$sock" ]]; then
     printf -- '-v %q:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent' "$sock"
   fi
+}
+
+# Mounts known_hosts only; the container never sees ~/.ssh itself.
+known_hosts_args() {
+  local known_hosts="$HOME/.ssh/known_hosts"
+  [[ -f "$known_hosts" ]] && printf -- '-v %q:%q:ro' "$known_hosts" "$known_hosts"
 }
 
 development_hosts() {
@@ -136,6 +156,8 @@ cmd_new() {
   repo=$(normalise_repo "$repo")
   [[ -n "$name" ]] || name=$(basename "$repo" .git)
 
+  ensure_agent
+
   local dir="$PROJECTS/$name"
   [[ -e "$dir" ]] && die "$dir already exists"
   mkdir -p "$PROJECTS" "$STATE/$name/secrets"
@@ -143,7 +165,7 @@ cmd_new() {
   echo "Cloning $repo..."
   if ! git clone --quiet "$repo" "$dir"; then
     rm -rf "$STATE/$name"
-    die "clone failed. For SSH URLs, load your key on the box first (keychain / ssh-add), or pass an https:// URL"
+    die "clone failed. Check that ~/.ssh/projects_ed25519 exists on the box and its public key is added to GitHub"
   fi
   log created "$dir"
 
@@ -161,6 +183,7 @@ cmd_new() {
 
 cmd_start() {
   local name=${1:?name required}
+  ensure_agent
   load_config "$name"
   local container
   container=$(container_name "$name")
@@ -179,16 +202,17 @@ cmd_start() {
   # shellcheck disable=SC2046
   docker run -d --name "$container" --hostname "$name" --init --restart unless-stopped \
     $(agent_socket_args) \
+    $(known_hosts_args) \
     -e PROJECT_NAME="$name" \
     -e PROJECT_SERVICES="$SERVICES" \
     -e RAILS_DEVELOPMENT_HOSTS="$(development_hosts)" \
     -w "$PROJECTS/$name" \
     -v "$PROJECTS/$name:$PROJECTS/$name" \
     -v "$STATE/$name/secrets:$HOME/.secrets:ro" \
-    -v "$HOME/.ssh:$HOME/.ssh:ro" \
     -v "$VINCEWORKS:$VINCEWORKS:ro" \
     -v projects-mise:"$HOME/.local/share/mise" \
     -v projects-claude:"$HOME/.claude" \
+    -v projects-gh:"$HOME/.config/gh" \
     -v projects-go:"$HOME/go" \
     -v "project-$name-pg:/var/lib/postgresql" \
     -p "$PORT:3000" \

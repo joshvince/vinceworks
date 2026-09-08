@@ -11,7 +11,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      build-essential git curl ca-certificates pkg-config sudo zsh tmux less vim-tiny \
+      build-essential git gh curl ca-certificates pkg-config sudo zsh tmux less vim-tiny \
       openssh-client gnupg unzip jq ripgrep tzdata procps iproute2 \
       libssl-dev zlib1g-dev libyaml-dev libffi-dev libgmp-dev libreadline-dev libncurses-dev \
       libvips libpq-dev postgresql postgresql-client sqlite3 libsqlite3-dev libjemalloc2 rustc \
@@ -42,7 +42,7 @@ ENV HOME=/home/$USERNAME \
     SHELL=/bin/zsh
 
 # Pre-create every volume mount point so fresh named volumes inherit this ownership.
-RUN mkdir -p .claude .local/share/mise .local/bin go .secrets projects
+RUN mkdir -p .claude .local/share/mise .local/bin go .secrets projects .config/gh .ssh
 
 # Claude Code and OpenCode are baked into the image so `rebuild` upgrades them
 # and ai.sh skips the download on every start.

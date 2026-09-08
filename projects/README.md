@@ -17,7 +17,7 @@ The production services already on the box (vincetagram as `postcard`, Filebrows
 - **Postgres runs inside the container** and is never published to the host. Rails' default development config uses the Unix socket and the OS user, so most apps need no database config at all. Data lives in a per-project volume.
 - **tmux inside the container** holds your sessions. Detach and everything keeps running.
 - **Shared volumes:** `projects-mise` (Ruby, Node and Go installs plus gems, so a compiled Ruby is reused by every project), `projects-claude` (`~/.claude`, one login for all projects) and `projects-go`. Each project also gets `project-<name>-pg` for its database.
-- **Git works** because the host's `/home/josh/.ssh` is mounted read-only and the container user has the same uid as `josh`. No agent forwarding is involved.
+- **Git works** through the box's ssh-agent. `start` loads a dedicated passphrase-less key, `~/.ssh/projects_ed25519`, into keychain and passes only the agent socket into the container. Containers never see the private key, so a coding agent inside cannot copy it. `gh` is installed and shares one login across containers via the `projects-gh` volume.
 - **Connecting** is SSH to the host, then `docker exec` into the container and attach tmux. There is no sshd inside containers. The box is reachable on the home LAN only for now; Tailscale is parked in `TODO.md`.
 
 ## Commands
@@ -84,10 +84,11 @@ Host state outside git:
 
 1. Copy secrets into the repo.
 2. Copy `.gitconfig`, `.gitmessage.txt` and `.gitignore_global` from vinceworks, dropping the macOS credential helper.
-3. Start Postgres and create a superuser role for `josh` if the project uses it (auto-detected from the Gemfile on `new`).
-4. `mise install` in the repo. The first Ruby compile takes 10 to 20 minutes and is cached in the shared volume after that. Node and Go are prebuilt and take seconds.
-5. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
-6. Create the tmux session `main` with windows `claude`, `server` and `shell`, then idle.
+3. Point `gh` at SSH for git operations.
+4. Start Postgres and create a superuser role for `josh` if the project uses it (auto-detected from the Gemfile on `new`).
+5. `mise install` in the repo. The first Ruby compile takes 10 to 20 minutes and is cached in the shared volume after that. Node and Go are prebuilt and take seconds.
+6. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
+7. Create the tmux session `main` with windows `claude`, `server` and `shell`, then idle.
 
 ## tmux in five minutes
 
@@ -116,11 +117,12 @@ On the box:
 1. `id josh` should report uid 1000. The build passes the real uid and gid as build args either way.
 2. `groups josh` should include `docker`.
 3. `mkdir -p /home/josh/projects /home/josh/.projects` and clone vinceworks to `/home/josh/vinceworks`.
-4. Save the output of `ss -ltn` as the baseline of production ports.
+4. Create the GitHub key: `ssh-keygen -t ed25519 -N '' -C 'vince-archive projects' -f ~/.ssh/projects_ed25519`, then add `~/.ssh/projects_ed25519.pub` at github.com/settings/keys. `start` loads it into keychain automatically.
+5. Save the output of `ss -ltn` as the baseline of production ports.
 
 On the Mac:
 
-5. Add `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` under `Host vince-archive` in `~/.ssh/config` so repeated calls are instant.
+6. Add `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` under `Host vince-archive` in `~/.ssh/config` so repeated calls are instant.
 
 ## Gotchas
 
@@ -128,8 +130,7 @@ On the Mac:
 - Ruby 3.1 and newer build against OpenSSL 3 on Ubuntu 24.04. Older Rubies would need extra work.
 - `ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid.
 - If a named volume ends up root-owned: `docker run --rm -v projects-claude:/v alpine chown -R 1000:1000 /v`.
-- The `.ssh` mount is read-only, so `known_hosts` cannot be appended inside the container. Add new hosts on the box.
-- The box's git keys have passphrases. Load one with `keychain` on the box and `start` passes the agent socket into the container, so git over SSH needs no prompt. Without it, `new` with an SSH URL fails; pass an `https://` URL for public repos, and git inside the container asks for the passphrase on push.
+- Only `known_hosts` and the agent socket enter the container. If `git` inside a container says permission denied, check `ssh-add -l` on the box shows `projects_ed25519` and that the public key is on GitHub. Deleting the key on GitHub revokes the box instantly.
 - Rails 7.1 and newer block unknown hostnames in development. The container sets `RAILS_DEVELOPMENT_HOSTS` to cover `vince-archive` and the box's hostname.
 - Two containers running `bundle install` for the same Ruby at the same time can race on the shared gem directory. Rerun if it happens.
 - tmux state does not survive a container restart. The entrypoint recreates the three windows; running processes are gone.

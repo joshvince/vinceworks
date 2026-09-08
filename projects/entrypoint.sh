@@ -30,6 +30,9 @@ done
 git config --global --unset-all credential.helper 2>/dev/null || true
 log ok "gitconfig"
 
+gh config set git_protocol ssh 2>/dev/null || true
+log ok "gh git protocol"
+
 case ",${PROJECT_SERVICES:-}," in
   *,postgres,*)
     echo "Starting postgres..."

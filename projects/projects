@@ -52,7 +52,8 @@ command=${1:-}
 shift
 case "$command" in
   new) remote_tty new "$@"; name=$(basename "${1:?}" .git); remote_tty attach "${2:-$name}" ;;
-  ls|stop|rm|rebuild|start|restart|build) remote_tty "$command" "$@" ;;
+  rm|rebuild) remote_tty "$command" "$@" ;;
+  ls|stop|start|restart|build) remote "$command" "$@" ;;
   secrets) cmd_secrets "$@" ;;
   open) cmd_open "$@" ;;
   sync) ssh "$HOST" 'git -C ~/vinceworks pull --ff-only' ;;

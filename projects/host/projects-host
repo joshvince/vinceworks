@@ -91,6 +91,18 @@ detect_services() {
   echo "$services"
 }
 
+# If keychain has loaded a key on the host, pass its agent socket into the
+# container so git over SSH works without a passphrase prompt.
+agent_socket_args() {
+  local env_file="$HOME/.keychain/$(hostname)-sh" sock=""
+  if [[ -f "$env_file" ]]; then
+    sock=$(sed -n 's/^SSH_AUTH_SOCK=\([^;]*\);.*/\1/p' "$env_file")
+  fi
+  if [[ -n "$sock" && -S "$sock" ]]; then
+    printf -- '-v %q:/ssh-agent -e SSH_AUTH_SOCK=/ssh-agent' "$sock"
+  fi
+}
+
 development_hosts() {
   local hosts="vince-archive,localhost,$(hostname)"
   local ts_ip ts_name
@@ -127,7 +139,10 @@ cmd_new() {
   mkdir -p "$PROJECTS" "$STATE/$name/secrets"
 
   echo "Cloning $repo..."
-  git clone --quiet "$repo" "$dir"
+  if ! git clone --quiet "$repo" "$dir"; then
+    rm -rf "$STATE/$name"
+    die "clone failed. For SSH URLs, load your key on the box first (keychain / ssh-add), or pass an https:// URL"
+  fi
   log created "$dir"
 
   $detect && services=$(detect_services "$dir")
@@ -159,7 +174,9 @@ cmd_start() {
   fi
 
   echo "Starting $container on port $PORT..."
+  # shellcheck disable=SC2046
   docker run -d --name "$container" --hostname "$name" --init --restart unless-stopped \
+    $(agent_socket_args) \
     -e PROJECT_NAME="$name" \
     -e PROJECT_SERVICES="$SERVICES" \
     -e RAILS_DEVELOPMENT_HOSTS="$(development_hosts)" \

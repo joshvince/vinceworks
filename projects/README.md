@@ -132,6 +132,7 @@ On the Mac:
 - `ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid.
 - If a named volume ends up root-owned: `docker run --rm -v projects-claude:/v alpine chown -R 1000:1000 /v`.
 - The `.ssh` mount is read-only, so `known_hosts` cannot be appended inside the container. Add new hosts on the box.
+- The box's git keys have passphrases. Load one with `keychain` on the box and `start` passes the agent socket into the container, so git over SSH needs no prompt. Without it, `new` with an SSH URL fails; pass an `https://` URL for public repos, and git inside the container asks for the passphrase on push.
 - Rails 7.1 and newer block unknown hostnames in development. The container sets `RAILS_DEVELOPMENT_HOSTS` to cover the Tailscale names.
 - Two containers running `bundle install` for the same Ruby at the same time can race on the shared gem directory. Rerun if it happens.
 - tmux state does not survive a container restart. The entrypoint recreates the three windows; running processes are gone.

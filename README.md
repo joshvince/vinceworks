@@ -41,6 +41,11 @@ To add a new shared skill, drop a `<skill-name>/SKILL.md` directory into `ai/ski
 
 ---
 
+### `projects`
+Per-project remote development environments in Docker on the home Ubuntu box. `projects new joshvince/vincetagram` clones, builds and attaches; `projects vincetagram` reattaches. See [projects/README.md](projects/README.md).
+
+---
+
 ## What's managed
 
 | File | Purpose |

@@ -1,0 +1,14 @@
+# Container-only zshrc. The macOS .zshrc in vinceworks is not reusable here.
+export PATH="$HOME/.local/bin:$HOME/.opencode/bin:$PATH"
+eval "$(mise activate zsh)"
+
+HISTFILE="$HOME/.zsh_history"
+HISTSIZE=50000
+SAVEHIST=50000
+setopt share_history hist_ignore_dups
+
+autoload -Uz compinit && compinit
+
+PROMPT='%F{cyan}%~%f $ '
+
+alias ll='ls -la'

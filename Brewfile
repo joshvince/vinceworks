@@ -24,4 +24,5 @@ brew install "ruby-build"
 brew install "redis", restart_service: true
 brew install "yarn"
 cask install "ngrok"
+cask install "tailscale"
 brew install "thefuck"

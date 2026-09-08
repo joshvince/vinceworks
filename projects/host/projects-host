@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# Host-side implementation of the `projects` tooling. Runs on the Ubuntu box.
+# The Mac CLI in ../projects calls this over SSH.
+set -euo pipefail
+
+PROJECTS="$HOME/projects"
+STATE="$HOME/.projects"
+VINCEWORKS="$HOME/vinceworks"
+IMAGE="projects:latest"
+PORT_START=4100
+PORT_STEP=10
+RESERVED_PORTS="80 443 3000 5432 8080"
+
+log() { printf '  [%s] %s\n' "$1" "$2"; }
+die() { log error "$1" >&2; exit 1; }
+
+usage() {
+  cat <<USAGE
+usage: projects-host <command> [args]
+
+  build                              build the image from $VINCEWORKS/projects
+  new <owner/repo|url> [name] [--services postgres]
+  start <name>
+  stop <name>
+  restart <name>
+  rm <name> [--purge]
+  rebuild [name]
+  ls
+  port <name>
+  attach <name> [session]
+USAGE
+  exit 1
+}
+
+container_name() { echo "project-$1"; }
+config_file() { echo "$STATE/$1/config"; }
+
+load_config() {
+  local file
+  file=$(config_file "$1")
+  [[ -f "$file" ]] || die "no project called '$1' (expected $file)"
+  # shellcheck disable=SC1090
+  source "$file"
+}
+
+container_status() {
+  docker inspect -f '{{.State.Status}}' "$(container_name "$1")" 2>/dev/null || echo absent
+}
+
+bound_ports() {
+  ss -ltnH 2>/dev/null | awk '{print $4}' | sed 's/.*://' | sort -u
+}
+
+reserved_ports() {
+  echo "$RESERVED_PORTS" | tr ' ' '\n'
+  [[ -f "$STATE/ports.reserved" ]] && grep -Eo '^[0-9]+' "$STATE/ports.reserved" || true
+}
+
+registered_ports() {
+  [[ -f "$STATE/ports" ]] && awk '{print $2}' "$STATE/ports" || true
+}
+
+port_is_free() {
+  local port=$1
+  ! { reserved_ports; registered_ports; bound_ports; } | grep -qx "$port"
+}
+
+allocate_port() {
+  local port=$PORT_START
+  while ! port_is_free "$port"; do
+    port=$((port + PORT_STEP))
+    [[ $port -lt 65000 ]] || die "no free port found"
+  done
+  echo "$port"
+}
+
+normalise_repo() {
+  local repo=$1
+  case "$repo" in
+    git@*|ssh://*|https://*) echo "$repo" ;;
+    */*) echo "git@github.com:$repo.git" ;;
+    *) die "repo must be owner/name or a git URL" ;;
+  esac
+}
+
+detect_services() {
+  local dir=$1 services=""
+  if [[ -f "$dir/Gemfile" ]] && grep -Eq "^\s*gem ['\"]pg['\"]" "$dir/Gemfile"; then
+    services="postgres"
+  fi
+  echo "$services"
+}
+
+development_hosts() {
+  local hosts="vince-archive,localhost,$(hostname)"
+  local ts_ip ts_name
+  if command -v tailscale >/dev/null; then
+    ts_ip=$(tailscale ip -4 2>/dev/null || true)
+    [[ -n "$ts_ip" ]] && hosts+=",$ts_ip"
+    ts_name=$(tailscale status --json 2>/dev/null | grep -o '"DNSName": *"[^"]*"' | head -1 | sed -E 's/.*"([^"]*)"$/\1/; s/\.$//')
+    [[ -n "$ts_name" ]] && hosts+=",$ts_name"
+  fi
+  echo "$hosts"
+}
+
+cmd_build() {
+  echo "Building $IMAGE..."
+  git -C "$VINCEWORKS" pull --ff-only --quiet || log warn "could not pull vinceworks, building from current checkout"
+  docker build -t "$IMAGE" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" "$VINCEWORKS/projects"
+  log ok "$IMAGE"
+}
+
+cmd_new() {
+  local repo="" name="" services="" detect=true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --services) services=$2; detect=false; shift 2 ;;
+      *) if [[ -z "$repo" ]]; then repo=$1; elif [[ -z "$name" ]]; then name=$1; else usage; fi; shift ;;
+    esac
+  done
+  [[ -n "$repo" ]] || usage
+  repo=$(normalise_repo "$repo")
+  [[ -n "$name" ]] || name=$(basename "$repo" .git)
+
+  local dir="$PROJECTS/$name"
+  [[ -e "$dir" ]] && die "$dir already exists"
+  mkdir -p "$PROJECTS" "$STATE/$name/secrets"
+
+  echo "Cloning $repo..."
+  git clone --quiet "$repo" "$dir"
+  log created "$dir"
+
+  $detect && services=$(detect_services "$dir")
+
+  local port
+  port=$(allocate_port)
+  echo "$name $port" >> "$STATE/ports"
+  printf 'REPO=%q\nPORT=%q\nSERVICES=%q\n' "$repo" "$port" "$services" > "$(config_file "$name")"
+  log created "port $port${services:+, services: $services}"
+
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || cmd_build
+  cmd_start "$name"
+}
+
+cmd_start() {
+  local name=${1:?name required}
+  load_config "$name"
+  local container
+  container=$(container_name "$name")
+
+  case "$(container_status "$name")" in
+    running) log ok "$container already running"; return ;;
+    absent) ;;
+    *) docker start "$container" >/dev/null; log ok "$container started"; return ;;
+  esac
+
+  if bound_ports | grep -qx "$PORT"; then
+    die "port $PORT is bound by something else on the host; refusing to start"
+  fi
+
+  echo "Starting $container on port $PORT..."
+  docker run -d --name "$container" --hostname "$name" --init --restart unless-stopped \
+    -e PROJECT_NAME="$name" \
+    -e PROJECT_SERVICES="$SERVICES" \
+    -e RAILS_DEVELOPMENT_HOSTS="$(development_hosts)" \
+    -w "$PROJECTS/$name" \
+    -v "$PROJECTS/$name:$PROJECTS/$name" \
+    -v "$STATE/$name/secrets:$HOME/.secrets:ro" \
+    -v "$HOME/.ssh:$HOME/.ssh:ro" \
+    -v "$VINCEWORKS:$VINCEWORKS:ro" \
+    -v projects-mise:"$HOME/.local/share/mise" \
+    -v projects-claude:"$HOME/.claude" \
+    -v projects-go:"$HOME/go" \
+    -v "project-$name-pg:/var/lib/postgresql" \
+    -p "$PORT:3000" \
+    "$IMAGE" >/dev/null
+
+  # Follow the entrypoint until it reports ready so the first Ruby compile is visible.
+  docker logs -f "$container" 2>&1 | sed '/^projects: ready$/q'
+  log ok "$container ready at http://vince-archive:$PORT"
+}
+
+cmd_stop() {
+  local name=${1:?name required}
+  load_config "$name"
+  docker stop "$(container_name "$name")" >/dev/null
+  log ok "$(container_name "$name") stopped"
+}
+
+cmd_restart() {
+  local name=${1:?name required}
+  load_config "$name"
+  if [[ "$(container_status "$name")" == absent ]]; then
+    log warn "no container for $name yet; run start"
+    return
+  fi
+  docker stop "$(container_name "$name")" >/dev/null
+  docker start "$(container_name "$name")" >/dev/null
+  log ok "$(container_name "$name") restarted"
+}
+
+cmd_rm() {
+  local name=${1:?name required} purge=false
+  [[ "${2:-}" == "--purge" ]] && purge=true
+  load_config "$name"
+  docker rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
+  log ok "$(container_name "$name") removed"
+  $purge || return
+  read -r -p "Delete $PROJECTS/$name, $STATE/$name and the database volume? [y/N] " answer
+  [[ "$answer" == y ]] || { log warn "purge cancelled"; return; }
+  rm -rf "$PROJECTS/$name" "$STATE/$name"
+  docker volume rm "project-$name-pg" >/dev/null 2>&1 || true
+  sed -i "/^$name /d" "$STATE/ports"
+  log ok "purged $name"
+}
+
+cmd_rebuild() {
+  cmd_build
+  local names=("$@")
+  if [[ ${#names[@]} -eq 0 ]]; then
+    mapfile -t names < <(docker ps --filter name='^project-' --format '{{.Names}}' | sed 's/^project-//')
+  fi
+  for name in "${names[@]}"; do
+    load_config "$name"
+    docker rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
+    cmd_start "$name"
+  done
+}
+
+cmd_ls() {
+  printf '%-20s %-10s %-6s %-10s %-8s %s\n' NAME STATUS PORT SERVICES SECRETS REPO
+  for file in "$STATE"/*/config; do
+    [[ -f "$file" ]] || continue
+    local name
+    name=$(basename "$(dirname "$file")")
+    # shellcheck disable=SC1090
+    source "$file"
+    local secrets=no
+    [[ -n "$(find "$STATE/$name/secrets" -type f 2>/dev/null | head -1)" ]] && secrets=yes
+    printf '%-20s %-10s %-6s %-10s %-8s %s\n' "$name" "$(container_status "$name")" "$PORT" "${SERVICES:--}" "$secrets" "$REPO"
+  done
+}
+
+cmd_port() {
+  load_config "${1:?name required}"
+  echo "$PORT"
+}
+
+cmd_attach() {
+  local name=${1:?name required} session=${2:-main}
+  load_config "$name"
+  [[ "$(container_status "$name")" == running ]] || cmd_start "$name"
+  exec docker exec -it -w "$PROJECTS/$name" "$(container_name "$name")" tmux new -A -s "$session"
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+case "$command" in
+  build|new|start|stop|restart|rm|rebuild|ls|port|attach) "cmd_$command" "$@" ;;
+  *) usage ;;
+esac

@@ -28,14 +28,16 @@ vinceworks:update --force   # also overwrite existing symlinks
 ---
 
 ### `vinceworks:ai`
-Sets up AI tooling and syncs agents. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/` so they're available globally across all projects. Re-run whenever you add a new agent.
+Sets up AI tooling and syncs agents and skills. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/`, and all skill directories from `ai/skills/` into `~/.claude/skills/` and `~/.config/opencode/skills/`, so they're available globally across all projects. Re-run whenever you add a new agent or skill.
 
 ```sh
 vinceworks:ai
-vinceworks:ai --force   # replace existing agents or wrong-target symlinks
+vinceworks:ai --force   # replace existing agents/skills or wrong-target symlinks
 ```
 
 To add a new shared agent, drop a `.md` file into `ai/agents/` and re-run `vinceworks:ai`.
+
+To add a new shared skill, drop a `<skill-name>/SKILL.md` directory into `ai/skills/` and re-run `vinceworks:ai`.
 
 ---
 

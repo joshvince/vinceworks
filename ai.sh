@@ -1,10 +1,14 @@
 #!/usr/bin/env zsh
-# Installs AI tools and propagates shared agent definitions into Claude Code and OpenCode.
+# Installs AI tools and propagates shared agent/skill definitions into Claude Code and OpenCode.
 #
 # Agent files in ./ai/agents are written in OpenCode's frontmatter format. We:
 #   - symlink them into ~/.config/opencode/agents/ (OpenCode reads this dir)
 #   - translate-and-copy them into ~/.claude/agents/ (Claude Code uses a different
 #     frontmatter shape — `name` + `description`, no per-tool permission block)
+#
+# Skill directories in ./ai/skills use SKILL.md — same format for both providers
+# (OpenCode reads Claude-compatible skill paths natively), so we just symlink each
+# skill directory into both ~/.claude/skills/ and ~/.config/opencode/skills/.
 #
 # Use --force to overwrite existing files / wrong-target symlinks.
 
@@ -159,5 +163,50 @@ mkdir -p "$CLAUDE_AGENTS_DIR"
 for agent_file in "${agent_files[@]}"; do
   install_claude_agent "$agent_file" "$CLAUDE_AGENTS_DIR/${agent_file:t}"
 done
+
+# --- Skills ---
+
+SKILLS_SOURCE="$VINCEWORKS_DIR/ai/skills"
+CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
+OPENCODE_SKILLS_DIR="$HOME/.config/opencode/skills"
+
+# Symlink a skill directory into a provider's skills dir. Same SKILL.md format
+# works for both providers, so no translation step is needed (unlike agents).
+link_skill() {
+  local src=$1 dest=$2
+  if [[ -L "$dest" ]]; then
+    local current_target=$(readlink "$dest")
+    if [[ "$current_target" == "$src" ]]; then
+      print "  [ok]      $dest"
+    elif $FORCE; then
+      rm "$dest" && ln -s "$src" "$dest"
+      print "  [replaced] $dest (was -> $current_target)"
+    else
+      print "  [warn]    $dest points elsewhere — skipping (use --force)"
+    fi
+  elif [[ -e "$dest" ]]; then
+    if $FORCE; then
+      rm -rf "$dest" && ln -s "$src" "$dest"
+      print "  [replaced] $dest (was a real directory or file)"
+    else
+      print "  [warn]    $dest exists and isn't our symlink — skipping (use --force)"
+    fi
+  else
+    ln -s "$src" "$dest"
+    print "  [linked]  $dest"
+  fi
+}
+
+skill_dirs=("$SKILLS_SOURCE"/*(N/))
+if [[ ${#skill_dirs[@]} -eq 0 ]]; then
+  print "\nNo skill directories found in $SKILLS_SOURCE — skipping skills."
+else
+  print "\nLinking skills into Claude Code and OpenCode..."
+  mkdir -p "$CLAUDE_SKILLS_DIR" "$OPENCODE_SKILLS_DIR"
+  for skill_dir in "${skill_dirs[@]}"; do
+    link_skill "$skill_dir" "$CLAUDE_SKILLS_DIR/${skill_dir:t}"
+    link_skill "$skill_dir" "$OPENCODE_SKILLS_DIR/${skill_dir:t}"
+  done
+fi
 
 print "\nDone. Use --force to replace existing files or wrong-target symlinks."

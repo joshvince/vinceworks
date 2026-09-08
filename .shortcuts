@@ -5,4 +5,4 @@ alias vinceworks:dev-machine-setup="$HOME/vinceworks/dev-machine-setup.sh"
 alias vinceworks:update="$HOME/vinceworks/update.sh"
 alias vinceworks:ai="$HOME/vinceworks/ai.sh"
 
-alias projects="$HOME/vinceworks/projects/projects"
+alias vinceworks="$HOME/vinceworks/vinceworks"

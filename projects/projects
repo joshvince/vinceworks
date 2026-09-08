@@ -9,17 +9,17 @@ LOCAL_PROJECTS=${PROJECTS_LOCAL:-$HOME/projects}
 
 usage() {
   cat <<USAGE
-usage: projects <command|name> [args]
+usage: vinceworks projects <command|name> [args]
 
-  projects <name> [session]             attach to a project's tmux session (default: main)
-  projects new <owner/repo> [name]      clone, allocate a port, build, start, attach
-  projects ls
-  projects stop <name>
-  projects rm <name> [--purge]
-  projects rebuild [name]
-  projects secrets <name> <relpath>...  copy files from $LOCAL_PROJECTS/<name> to the host, then restart
-  projects open <name>                  open the project's URL in the browser
-  projects sync                         git pull vinceworks on the host
+  vinceworks projects <name> [session]             attach to a project's tmux session (default: main)
+  vinceworks projects new <owner/repo> [name]      clone, allocate a port, build, start, attach
+  vinceworks projects ls
+  vinceworks projects stop <name>
+  vinceworks projects rm <name> [--purge]
+  vinceworks projects rebuild [name]
+  vinceworks projects secrets <name> <relpath>...  copy files from $LOCAL_PROJECTS/<name> to the host, then restart
+  vinceworks projects open <name>                  open the project's URL in the browser
+  vinceworks projects sync                         git pull vinceworks on the host
 USAGE
   exit 1
 }

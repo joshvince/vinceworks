@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Top-level CLI for vinceworks. Forwards subcommands to the scripts they wrap.
+set -euo pipefail
+
+VINCEWORKS_DIR=$(cd "$(dirname "$(realpath "$0")")" && pwd)
+
+usage() {
+  cat <<USAGE
+usage: vinceworks <command> [args]
+
+  vinceworks projects [args]           per-project remote dev environments (see projects/README.md)
+  vinceworks update [args]             pick up dotfile and package changes on an existing machine
+  vinceworks ai [args]                 install AI tools and sync agents/skills
+  vinceworks dev-machine-setup         full setup for a fresh machine
+USAGE
+  exit 1
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  projects) exec "$VINCEWORKS_DIR/projects/projects" "$@" ;;
+  update) exec "$VINCEWORKS_DIR/update.sh" "$@" ;;
+  ai) exec "$VINCEWORKS_DIR/ai.sh" "$@" ;;
+  dev-machine-setup) exec "$VINCEWORKS_DIR/dev-machine-setup.sh" "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac

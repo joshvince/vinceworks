@@ -3,8 +3,8 @@
 Each project gets its own development environment: one Docker container on the home Ubuntu box (`vince-archive`), with the repo, language toolchain, database, tmux and Claude Code inside. From the Mac, two commands do most of the work:
 
 ```sh
-projects new joshvince/vincetagram   # clone, build, start, attach
-projects vincetagram                 # attach to a running one
+vinceworks projects new joshvince/vincetagram   # clone, build, start, attach
+vinceworks projects vincetagram                 # attach to a running one
 ```
 
 The production services already on the box (vincetagram as `postcard`, Filebrowser, nginx) are untouched. They own host ports 80, 443, 3000, 5432 and 8080, and the port mapper below never allocates those.
@@ -25,16 +25,16 @@ The production services already on the box (vincetagram as `postcard`, Filebrows
 All run on the Mac. Each one is a single SSH call to the host script.
 
 ```sh
-projects <name> [session]            # attach (session defaults to "main")
-projects new <owner/repo> [name]     # clone, allocate a port, build image if needed, start, attach
-projects ls                          # name, status, host port, services, repo, secrets present
-projects stop <name>
-projects rm <name>                   # removes the container only; repo, secrets, database survive
-projects rm <name> --purge           # also deletes repo, state, database volume and port registry line
-projects rebuild [name]              # rebuild the image, recreate the container(s)
-projects secrets <name> <relpath>... # scp files from ~/projects/<name> on the Mac into the host secrets dir, then restart
-projects open <name>                 # open http://vince-archive:<port> in the browser
-projects sync                        # git pull vinceworks on the host after you push tooling changes
+vinceworks projects <name> [session]            # attach (session defaults to "main")
+vinceworks projects new <owner/repo> [name]     # clone, allocate a port, build image if needed, start, attach
+vinceworks projects ls                          # name, status, host port, services, repo, secrets present
+vinceworks projects stop <name>
+vinceworks projects rm <name>                   # removes the container only; repo, secrets, database survive
+vinceworks projects rm <name> --purge           # also deletes repo, state, database volume and port registry line
+vinceworks projects rebuild [name]              # rebuild the image, recreate the container(s)
+vinceworks projects secrets <name> <relpath>... # scp files from ~/projects/<name> on the Mac into the host secrets dir, then restart
+vinceworks projects open <name>                 # open http://vince-archive:<port> in the browser
+vinceworks projects sync                        # git pull vinceworks on the host after you push tooling changes
 ```
 
 ## Port mapper
@@ -52,7 +52,7 @@ Every app listens on port 3000 inside its own container. The host script maps on
 Files that are not in git (`config/master.key`, `.env`) live on the host in `/home/josh/.projects/<name>/secrets/` using repo-relative paths. The directory is mounted read-only into the container, and the entrypoint copies each file into the repo on every start. Push them from the Mac:
 
 ```sh
-projects secrets vincetagram config/master.key .env
+vinceworks projects secrets vincetagram config/master.key .env
 ```
 
 Use a development-only `.env`. Never copy the production one.
@@ -60,6 +60,7 @@ Use a development-only `.env`. Never copy the production one.
 ## Files
 
 ```
+vinceworks            top-level CLI at the repo root; `vinceworks projects ...` forwards here
 projects/
   README.md           this file
   projects            Mac-side CLI
@@ -96,18 +97,18 @@ The prefix is Ctrl+a, written `C-a` below.
 
 - A **window** is a tab. `C-a c` creates one, `C-a 1` to `C-a 9` jump, `C-a ,` renames, `C-a &` kills.
 - A **pane** is a split inside a window. `C-a |` splits right, `C-a -` splits below, `C-a` plus an arrow key moves, `C-a x` kills.
-- A **session** is a whole workspace. `main` is created for you. `projects <name> scratch` from the Mac creates or attaches a second session called `scratch`. Inside tmux, `C-a s` lists sessions to switch between.
+- A **session** is a whole workspace. `main` is created for you. `vinceworks projects <name> scratch` from the Mac creates or attaches a second session called `scratch`. Inside tmux, `C-a s` lists sessions to switch between.
 - `C-a d` detaches. Nothing stops.
 
 ```
-C-a d        detach, everything keeps running     projects <name>       reattach
-C-a c        new window                            C-a 1..9              jump to window
-C-a n / p    next / previous window                C-a ,                 rename window
-C-a |  C-a - split right / split below             C-a arrows            move between panes
-C-a x        kill pane                             C-a &                 kill window
-C-a s        pick a session                        projects <name> foo   new or existing session foo
-C-a [        scroll mode, q to quit                mouse                 click, scroll, resize
-C-a r        reload config                         tmux ls               list sessions
+C-a d        detach, everything keeps running     vinceworks projects <name>       reattach
+C-a c        new window                            C-a 1..9                         jump to window
+C-a n / p    next / previous window                C-a ,                            rename window
+C-a |  C-a - split right / split below             C-a arrows                       move between panes
+C-a x        kill pane                             C-a &                            kill window
+C-a s        pick a session                        vinceworks projects <name> foo   new or existing session foo
+C-a [        scroll mode, q to quit                mouse                            click, scroll, resize
+C-a r        reload config                         tmux ls                          list sessions
 ```
 
 ## Host prerequisites (once)

@@ -14,7 +14,7 @@ The container boundary is kept for one reason: production (`postcard` and its Po
 - **Unprivileged sshd on host port 2222**, running as `josh` inside the container. Host keys and `authorized_keys` live in the persistent home, not the image.
 - **The Paseo daemon** listens on `127.0.0.1:6767` inside the container and is reached only through the sshd tunnel: Paseo's SSH transport runs `ssh -W 127.0.0.1:6767` against port 2222, it never starts or installs anything remotely. The entrypoint execs the daemon in the foreground as the container's main process, so killing it restarts the whole container.
 - **Postgres** runs inside the container as a system service, with data in the named volume `vinceworks-sandbox-pg`. Worktrees of one repo share one dev database, the same as on the laptop.
-- **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers. Each repo's `paseo.json` sets `worktree.servicePorts.range` to `4100-4199`, and apps bind the `PASEO_WORKTREE_PORT` environment variable Paseo exports into the worktree.
+- **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers. A repo's `paseo.json` declares a `server` script of type `service` and sets `worktree.servicePorts.range` to `4100-4199`, so when Paseo starts that script it gets a port from the range as `PASEO_PORT` and the app is reachable from the Mac.
 - **Git works through `gh`.** There is no SSH key. A fine-grained GitHub PAT is logged in once with `gh auth login --with-token`, then `gh auth setup-git` points git's credential helper at it.
 - **Caps**: 3 CPUs, 10 GB of memory, set in the Quadlet unit's `PodmanArgs`.
 
@@ -31,7 +31,7 @@ vinceworks sandbox ps                     # list worktrees, their ports and what
 vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
 
-Ports come from Paseo's per-worktree allocation inside the 4100 to 4199 range, so a row is only reachable from the Mac when the app binds `PASEO_WORKTREE_PORT`.
+`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand on a port in the range.
 
 `push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
 
@@ -57,11 +57,14 @@ Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants w
       "cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env",
       "cp \"$PASEO_SOURCE_CHECKOUT_PATH/config/master.key\" config/master.key"
     ]
+  },
+  "scripts": {
+    "server": { "type": "service", "command": "bin/rails server -p $PASEO_PORT" }
   }
 }
 ```
 
-Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from the main checkout into the new worktree. No `bundle install` and no application code belongs in a hook.
+`worktree.servicePorts.range` bounds the ports Paseo will hand out to `service` scripts for this repo's worktrees; `worktree.setup` copies secrets into a new worktree before anything runs; `scripts.server` is the service Paseo starts and stops per worktree, binding to the `PASEO_PORT` it was allocated. Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from the main checkout into the new worktree. No `bundle install` and no application code belongs in a hook.
 
 ## Secrets
 
@@ -169,3 +172,4 @@ C-a r        reload config                         tmux ls                      
 - The sshd host key lives in the persistent home, not the image, so the Mac's `known_hosts` entry for `vinceworks-sandbox` stays valid across `rebuild`.
 - Worktrees of one repo share one dev database, the same as on the laptop. There is no per-worktree database.
 - The Paseo daemon runs as the container's main process. Killing it, including a crash, restarts the whole container: sshd and Postgres come back up too.
+- `~/vinceworks` inside the sandbox is the read-only mount of the box's own checkout, which the image builds from and the entrypoint copies dotfiles from. Paseo cannot create worktrees there. To work on vinceworks itself, clone it like any other project with `vinceworks sandbox push https://github.com/joshvince/vinceworks.git` and open `~/projects/vinceworks`.

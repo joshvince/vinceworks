@@ -12,3 +12,4 @@ AcceptEnv LANG LC_*
 X11Forwarding no
 PermitRootLogin no
 AllowUsers josh
+Subsystem sftp /usr/lib/openssh/sftp-server

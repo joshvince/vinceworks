@@ -1,12 +1,15 @@
 #!/usr/bin/env zsh
-# Updates dotfiles and packages on an existing machine.
+# Updates dotfiles and fonts on an existing machine.
 # Skips anything already in place. Use --force to overwrite.
+# Homebrew is left alone unless --packages is passed.
 
 set -euo pipefail
 
 FORCE=false
+PACKAGES=false
 for arg in "$@"; do
   [[ "$arg" == "--force" ]] && FORCE=true
+  [[ "$arg" == "--packages" ]] && PACKAGES=true
 done
 
 link() {
@@ -27,8 +30,12 @@ link() {
 
 # --- Packages ---
 
-print "\nUpdating packages..."
-brew bundle --no-upgrade --file="$HOME/vinceworks/Brewfile"
+if $PACKAGES; then
+  print "\nUpdating packages..."
+  brew bundle --no-upgrade --file="$HOME/vinceworks/Brewfile"
+else
+  print "\nSkipping packages (use --packages to run brew bundle)"
+fi
 
 # --- Dotfiles ---
 
@@ -64,4 +71,4 @@ for font in "$HOME/vinceworks/fonts/"*.otf; do
   fi
 done
 
-print "\nDone. Run with --force to overwrite existing symlinks and fonts."
+print "\nDone. --force overwrites existing symlinks and fonts, --packages runs brew bundle."

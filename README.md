@@ -6,7 +6,7 @@ The repo now houses a broad CLI-esque program that I can use to:
 
 - setup a new or sync dev machines with my preferred dev tool settings, including terminals, AI harnesses etc
 - maintain 'agent definitions' or system prompts I use when writing code with AI
-- create 'remote' dev environments on my home server for my own projects that allow agents a sandboxed environment to do the heavy lifting
+- run a 'remote' sandbox on my home server that gives agents a sandboxed environment to do the heavy lifting on my own projects
 
 
 ## Commands
@@ -49,8 +49,8 @@ To add a new shared skill, drop a `<skill-name>/SKILL.md` directory into `ai/ski
 
 ---
 
-### `vinceworks projects`
-Per-project remote development environments in rootless Podman on the home Ubuntu box. `vinceworks projects new joshvince/vincetagram` clones, builds and attaches; `vinceworks projects vincetagram` reattaches. The `vinceworks` command lives at the repo root and also wraps `update`, `ai` and `dev-machine-setup`. See [projects/README.md](projects/README.md).
+### `vinceworks sandbox`
+One rootless Podman container, `vinceworks-sandbox`, on the home Ubuntu box, holding every personal project checkout, Postgres, tmux and Claude Code. `vinceworks sandbox up` starts it, `vinceworks sandbox rebuild` rebuilds the image, and `vinceworks sandbox push <repo> <paths...>` copies secret files in. Paseo Desktop on the Mac is the primary way in, with `vinceworks tmux` as the escape hatch when you want a shell directly. The `vinceworks` command lives at the repo root and also wraps `update`, `ai` and `dev-machine-setup`. See [sandbox/README.md](sandbox/README.md).
 
 ---
 

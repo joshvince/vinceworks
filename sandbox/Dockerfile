@@ -1,5 +1,4 @@
-# Generic development image for the `projects` tooling. One image serves every
-# project; language versions are installed per repo by mise at container start.
+# Generic development image for the sandbox; language versions are installed per repo by mise.
 FROM docker.io/library/ubuntu:24.04
 
 ARG UID=1000
@@ -12,9 +11,16 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential git gh curl ca-certificates pkg-config sudo zsh tmux less vim-tiny \
-      openssh-client gnupg unzip jq ripgrep tzdata procps iproute2 \
+      openssh-client openssh-server gnupg unzip jq ripgrep tzdata procps iproute2 \
       libssl-dev zlib1g-dev libyaml-dev libffi-dev libgmp-dev libreadline-dev libncurses-dev \
       libvips libpq-dev postgresql postgresql-client sqlite3 libsqlite3-dev libjemalloc2 rustc \
+    && mkdir -p /run/sshd \
+    && rm -rf /var/lib/apt/lists/*
+
+# Node 22 from NodeSource. Paseo CLI, Claude Code, and OpenCode are npm globals installed to a system path because the home directory is bind-mounted at runtime and would hide anything installed there.
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && npm install -g @getpaseo/cli@0.7.2 @anthropic-ai/claude-code opencode-ai \
     && rm -rf /var/lib/apt/lists/*
 
 # ubuntu:24.04 ships an `ubuntu` user at uid 1000. Remove it so the container
@@ -25,8 +31,10 @@ RUN userdel -r ubuntu 2>/dev/null || true \
     && echo "$USERNAME ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$USERNAME" \
     && chmod 0440 "/etc/sudoers.d/$USERNAME"
 
-# mise binary lives in the image; its installs live in a shared volume.
+# mise binary lives in the image; its installs live in the bind-mounted home.
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+
+COPY sshd_config /etc/ssh/sandbox_sshd_config
 
 USER $USERNAME
 WORKDIR /home/$USERNAME
@@ -36,21 +44,11 @@ ENV HOME=/home/$USERNAME \
     MISE_DATA_DIR=/home/$USERNAME/.local/share/mise \
     MISE_YES=1 \
     MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS=ruby,node,python,go \
-    PATH=/home/$USERNAME/.local/bin:/home/$USERNAME/.opencode/bin:$PATH \
+    PATH=/home/$USERNAME/.local/bin:$PATH \
     BINDING=0.0.0.0 \
     TERM=xterm-256color \
     SHELL=/bin/zsh
 
-# Pre-create every volume mount point so fresh named volumes inherit this ownership.
-RUN mkdir -p .claude .local/share/mise .local/bin go .secrets projects .config/gh .ssh
+COPY --chmod=755 entrypoint.sh /usr/local/bin/sandbox-entrypoint
 
-# Claude Code and OpenCode are baked into the image so `rebuild` upgrades them
-# and ai.sh skips the download on every start.
-RUN curl -fsSL https://claude.ai/install.sh | bash \
-    && curl -fsSL https://opencode.ai/install | bash
-
-COPY --chown=$UID:$GID tmux.conf .tmux.conf
-COPY --chown=$UID:$GID zshrc .zshrc
-COPY --chmod=755 entrypoint.sh /usr/local/bin/projects-entrypoint
-
-ENTRYPOINT ["/usr/local/bin/projects-entrypoint"]
+ENTRYPOINT ["/usr/local/bin/sandbox-entrypoint"]

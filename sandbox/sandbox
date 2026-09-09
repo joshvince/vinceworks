@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Mac-side CLI for the sandbox container. up/rebuild/status are one SSH call
+# to sandbox/host/sandbox-host on the box. push copies secrets in.
+set -euo pipefail
+
+HOST=${SANDBOX_HOST:-vince-archive}
+SSH_HOST=${SANDBOX_SSH_HOST:-vinceworks-sandbox}
+LOCAL_PROJECTS=${SANDBOX_LOCAL:-$HOME/projects}
+
+usage() {
+  cat <<USAGE
+usage: vinceworks sandbox <command> [args]
+
+  vinceworks sandbox up                     start the sandbox, building it first if needed
+  vinceworks sandbox rebuild                 rebuild the image and restart the sandbox
+  vinceworks sandbox status                  show systemd status for the sandbox
+  vinceworks sandbox push <repo> <paths...>  copy files from $LOCAL_PROJECTS/<repo> to the sandbox
+USAGE
+  exit 1
+}
+
+remote() { ssh -t "$HOST" "\$HOME/vinceworks/sandbox/host/sandbox-host $1"; }
+
+cmd_push() {
+  local repo=${1:?repo required}
+  shift
+  [[ $# -gt 0 ]] || usage
+  for path in "$@"; do
+    local src="$LOCAL_PROJECTS/$repo/$path"
+    [[ -f "$src" ]] || { echo "  [error] $src not found" >&2; exit 1; }
+    local dest="projects/$repo/$path"
+    ssh "$SSH_HOST" "mkdir -p $(printf %q "$(dirname "$dest")")"
+    scp -q "$src" "$SSH_HOST:$(printf %q "$dest")"
+    echo "  [copied] $path"
+  done
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  up|rebuild|status) remote "$command" ;;
+  push) cmd_push "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac

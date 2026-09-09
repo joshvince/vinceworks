@@ -1,0 +1,14 @@
+# Unprivileged sshd, run by josh on port 2222. Copied into the image at
+# /etc/ssh/sandbox_sshd_config; the entrypoint starts sshd with -f pointing here.
+Port 2222
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+UsePAM no
+PidFile none
+AuthorizedKeysFile /home/josh/.ssh/sshd/authorized_keys
+HostKey /home/josh/.ssh/sshd/ssh_host_ed25519_key
+AcceptEnv LANG LC_*
+X11Forwarding no
+PermitRootLogin no
+AllowUsers josh

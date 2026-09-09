@@ -23,7 +23,8 @@ shift
 
 case "$command" in
   sandbox) exec "$VINCEWORKS_DIR/sandbox/sandbox" "$@" ;;
-  tmux) exec ssh -t "${SANDBOX_SSH_HOST:-vinceworks-sandbox}" 'cd ~/projects && tmux new -A -s main' ;;
+  # Ghostty sends TERM=xterm-ghostty, which the container has no terminfo for, so tmux refuses to start.
+  tmux) exec ssh -t "${SANDBOX_SSH_HOST:-vinceworks-sandbox}" 'export TERM=xterm-256color; cd ~/projects && tmux new -A -s main' ;;
   update) exec "$VINCEWORKS_DIR/update.sh" "$@" ;;
   ai) exec "$VINCEWORKS_DIR/ai.sh" "$@" ;;
   dev-machine-setup) exec "$VINCEWORKS_DIR/dev-machine-setup.sh" "$@" ;;

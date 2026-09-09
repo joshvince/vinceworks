@@ -42,6 +42,15 @@ if gh auth status >/dev/null 2>&1; then
   gh auth setup-git
 fi
 
+echo "Installing toolchains in the background (log: ~/mise-install.log)..."
+# Runs in the background so sshd and Paseo are reachable while a new Ruby compiles.
+(
+  for dir in "$HOME"/projects/*/; do
+    [[ -d "$dir" ]] || continue
+    (cd "$dir" && mise trust --yes >/dev/null 2>&1; mise install)
+  done
+) > "$HOME/mise-install.log" 2>&1 &
+
 echo "sandbox: ready"
 
 # The pid file survives in the bind-mounted home, and a stale one makes the daemon refuse to start if a new process has that pid.

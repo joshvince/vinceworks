@@ -108,7 +108,8 @@ On the Mac:
 4. Start Postgres and create a superuser role for `josh` if it does not exist yet.
 5. Start sshd on port 2222.
 6. Run `gh auth setup-git` if `gh auth status` succeeds, so a rebuilt image picks the credential helper back up.
-7. `exec paseo daemon start --foreground --listen 127.0.0.1:6767 --home ~/.paseo`, in the foreground as the container's main process.
+7. `mise install` runs in every repo under `~/projects`, in the background, logging to `~/mise-install.log`, so a new Ruby version compiles without holding up sshd or Paseo.
+8. `exec paseo daemon start --foreground --listen 127.0.0.1:6767 --home ~/.paseo`, in the foreground as the container's main process.
 
 ## Files
 
@@ -161,7 +162,7 @@ C-a r        reload config                         tmux ls                      
 
 ## Gotchas
 
-- The first Ruby compile per version is slow, about three minutes. It is not hung, it is compiling.
+- The first Ruby compile per version is slow, about three minutes. It is not hung, it is compiling. It now happens in the background at container start for every cloned repo, and a repo cloned after start gets its toolchain on first use through mise's auto-install.
 - Ruby 3.1 and newer build against OpenSSL 3 on Ubuntu 24.04. Older Rubies would need extra work.
 - `docker.io/library/ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid. The base image is fully qualified because Ubuntu's Podman ships no unqualified search registries, so an unqualified `ubuntu:24.04` fails the build.
 - Rails 7.1 and newer block unknown hostnames in development. The Quadlet unit sets `RAILS_DEVELOPMENT_HOSTS` to cover the box's LAN IP and hostname.

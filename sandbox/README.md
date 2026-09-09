@@ -8,7 +8,7 @@ The container boundary is kept for one reason: production (`postcard` and its Po
 
 ## How it fits together
 
-- **One rebuildable image.** Ubuntu 24.04 plus build tools, `mise`, a Postgres server, Node 22, and Claude Code, OpenCode and the Paseo CLI installed as npm globals. They are installed globally rather than into the home directory because the home is bind-mounted at runtime, which would hide anything a curl installer wrote there.
+- **One rebuildable image.** Ubuntu 24.04 plus build tools, `mise`, a Postgres server, Node 22, and OpenCode and the Paseo CLI as npm globals on a system path (because the bind-mounted home would hide anything a curl installer wrote there at build time). Claude Code is installed by `ai.sh` with the native installer into the persistent home on first start, so it self-updates with `claude update` and survives rebuilds.
 - **A persistent home**, bind-mounted from `/home/josh/vinceworks-sandbox` on the host to `/home/josh` in the container, with the container user taking uid 1000 via `--userns=keep-id`. Everything that should survive a rebuild (repos, gems, mise installs, sshd keys, Paseo state) lives there.
 - **A Quadlet unit** at `~/.config/containers/systemd/vinceworks-sandbox.container` with `Restart=always`, so the container comes back after `systemctl --user start` and after a host reboot. Linger is enabled for `josh` so the user manager stays up with no session attached.
 - **Unprivileged sshd on host port 2222**, running as `josh` inside the container. Host keys and `authorized_keys` live in the persistent home, not the image.

@@ -13,6 +13,10 @@ for f in .gitconfig .gitmessage.txt .gitignore_global; do
 done
 cp "$vinceworks/sandbox/zshrc" "$HOME/.zshrc"
 cp "$vinceworks/sandbox/zshenv" "$HOME/.zshenv"
+# sshd starts sessions with a clean environment, so the image and unit env has to be re-exported for ssh and tmux shells.
+for var in MISE_DATA_DIR MISE_YES MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS CLAUDE_CONFIG_DIR BINDING RAILS_DEVELOPMENT_HOSTS TZ LANG; do
+  [[ -n "${!var:-}" ]] && printf 'export %s=%q\n' "$var" "${!var}" >> "$HOME/.zshenv"
+done
 cp "$vinceworks/sandbox/tmux.conf" "$HOME/.tmux.conf"
 git config --global --unset-all credential.helper 2>/dev/null || true
 

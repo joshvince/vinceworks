@@ -42,4 +42,7 @@ if gh auth status >/dev/null 2>&1; then
 fi
 
 echo "sandbox: ready"
+
+# The pid file survives in the bind-mounted home, and a stale one makes the daemon refuse to start if a new process has that pid.
+rm -f "$HOME/.paseo/paseo.pid"
 exec paseo daemon start --foreground --listen 127.0.0.1:6767 --home "$HOME/.paseo"

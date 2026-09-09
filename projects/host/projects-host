@@ -7,6 +7,8 @@ PROJECTS="$HOME/projects"
 STATE="$HOME/.projects"
 VINCEWORKS="$HOME/vinceworks"
 IMAGE="projects:latest"
+# The container engine, overridable so `PROJECTS_ENGINE=docker` rolls back without a code change.
+ENGINE=${PROJECTS_ENGINE:-podman}
 PORT_START=4100
 PORT_STEP=10
 RESERVED_PORTS="80 443 3000 5432 8080"
@@ -45,7 +47,7 @@ load_config() {
 
 container_status() {
   local status
-  status=$(docker inspect -f '{{.State.Status}}' "$(container_name "$1")" 2>/dev/null) || status=absent
+  status=$("$ENGINE" inspect -f '{{.State.Status}}' "$(container_name "$1")" 2>/dev/null) || status=absent
   echo "$status"
 }
 
@@ -140,7 +142,7 @@ development_hosts() {
 cmd_build() {
   echo "Building $IMAGE..."
   git -C "$VINCEWORKS" pull --ff-only --quiet || log warn "could not pull vinceworks, building from current checkout"
-  docker build -t "$IMAGE" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" "$VINCEWORKS/projects"
+  "$ENGINE" build -t "$IMAGE" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" "$VINCEWORKS/projects"
   log ok "$IMAGE"
 }
 
@@ -177,7 +179,7 @@ cmd_new() {
   printf 'REPO=%q\nPORT=%q\nSERVICES=%q\n' "$repo" "$port" "$services" > "$(config_file "$name")"
   log created "port $port${services:+, services: $services}"
 
-  docker image inspect "$IMAGE" >/dev/null 2>&1 || cmd_build
+  "$ENGINE" image inspect "$IMAGE" >/dev/null 2>&1 || cmd_build
   cmd_start "$name"
 }
 
@@ -191,7 +193,7 @@ cmd_start() {
   case "$(container_status "$name")" in
     running) log ok "$container already running"; return ;;
     absent) ;;
-    *) docker start "$container" >/dev/null; log ok "$container started"; return ;;
+    *) "$ENGINE" start "$container" >/dev/null; log ok "$container started"; return ;;
   esac
 
   if bound_ports | grep -qx "$PORT"; then
@@ -200,7 +202,9 @@ cmd_start() {
 
   echo "Starting $container on port $PORT..."
   # shellcheck disable=SC2046
-  docker run -d --name "$container" --hostname "$name" --init --restart unless-stopped \
+  "$ENGINE" run -d --name "$container" --hostname "$name" --init \
+    --userns=keep-id:uid=$(id -u),gid=$(id -g) \
+    --memory 4g --cpus 4 \
     $(agent_socket_args) \
     $(known_hosts_args) \
     -e PROJECT_NAME="$name" \
@@ -219,9 +223,9 @@ cmd_start() {
     "$IMAGE" >/dev/null
 
   # Follow the entrypoint until it reports ready so the first Ruby compile is visible.
-  docker logs -f "$container" 2>&1 | sed '/^projects: ready$/q'
+  "$ENGINE" logs -f "$container" 2>&1 | sed '/^projects: ready$/q'
   if [[ "$(container_status "$name")" != running ]]; then
-    die "$container exited during start; see: docker logs $container"
+    die "$container exited during start; see: $ENGINE logs $container"
   fi
   log ok "$container ready at http://vince-archive:$PORT"
 }
@@ -229,7 +233,7 @@ cmd_start() {
 cmd_stop() {
   local name=${1:?name required}
   load_config "$name"
-  docker stop "$(container_name "$name")" >/dev/null
+  "$ENGINE" stop "$(container_name "$name")" >/dev/null
   log ok "$(container_name "$name") stopped"
 }
 
@@ -240,8 +244,8 @@ cmd_restart() {
     log warn "no container for $name yet; run start"
     return
   fi
-  docker stop "$(container_name "$name")" >/dev/null
-  docker start "$(container_name "$name")" >/dev/null
+  "$ENGINE" stop "$(container_name "$name")" >/dev/null
+  "$ENGINE" start "$(container_name "$name")" >/dev/null
   log ok "$(container_name "$name") restarted"
 }
 
@@ -249,13 +253,13 @@ cmd_rm() {
   local name=${1:?name required} purge=false
   [[ "${2:-}" == "--purge" ]] && purge=true
   load_config "$name"
-  docker rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
+  "$ENGINE" rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
   log ok "$(container_name "$name") removed"
   $purge || return
   read -r -p "Delete $PROJECTS/$name, $STATE/$name and the database volume? [y/N] " answer
   [[ "$answer" == y ]] || { log warn "purge cancelled"; return; }
   rm -rf "$PROJECTS/$name" "$STATE/$name"
-  docker volume rm "project-$name-pg" >/dev/null 2>&1 || true
+  "$ENGINE" volume rm "project-$name-pg" >/dev/null 2>&1 || true
   sed -i "/^$name /d" "$STATE/ports"
   log ok "purged $name"
 }
@@ -264,11 +268,11 @@ cmd_rebuild() {
   cmd_build
   local names=("$@")
   if [[ ${#names[@]} -eq 0 ]]; then
-    mapfile -t names < <(docker ps --filter name='^project-' --format '{{.Names}}' | sed 's/^project-//')
+    mapfile -t names < <("$ENGINE" ps --filter name='^project-' --format '{{.Names}}' | sed 's/^project-//')
   fi
   for name in "${names[@]}"; do
     load_config "$name"
-    docker rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
+    "$ENGINE" rm -f "$(container_name "$name")" >/dev/null 2>&1 || true
     cmd_start "$name"
   done
 }
@@ -296,7 +300,7 @@ cmd_attach() {
   local name=${1:?name required} session=${2:-main}
   load_config "$name"
   [[ "$(container_status "$name")" == running ]] || cmd_start "$name"
-  exec docker exec -it -w "$PROJECTS/$name" "$(container_name "$name")" tmux new -A -s "$session"
+  exec "$ENGINE" exec -it -w "$PROJECTS/$name" "$(container_name "$name")" tmux new -A -s "$session"
 }
 
 command=${1:-}

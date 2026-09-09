@@ -1,6 +1,6 @@
 # Generic development image for the `projects` tooling. One image serves every
 # project; language versions are installed per repo by mise at container start.
-FROM ubuntu:24.04
+FROM docker.io/library/ubuntu:24.04
 
 ARG UID=1000
 ARG GID=1000

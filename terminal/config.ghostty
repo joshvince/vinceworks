@@ -1,0 +1,5 @@
+theme = TokyoNight
+font-family = Hack Nerd Font Mono
+font-size = 15
+macos-option-as-alt = true
+keybind = alt+3=text:#

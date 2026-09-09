@@ -91,6 +91,12 @@ ln -s "$HOME/vinceworks/.shortcuts.private" "$HOME/.shortcuts.private"
 
 print "  [linked]  dotfiles"
 
+if [[ "$TERMINAL_CASK" == "ghostty" ]]; then
+  mkdir -p "$HOME/.config/ghostty"
+  ln -s "$HOME/vinceworks/terminal/config.ghostty" "$HOME/.config/ghostty/config.ghostty"
+  print "  [linked]  ghostty config"
+fi
+
 # --- Fonts ---
 
 print "\nInstalling fonts..."

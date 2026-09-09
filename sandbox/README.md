@@ -31,7 +31,7 @@ vinceworks sandbox ps                     # list worktrees, their ports and what
 vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
 
-`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand on a port in the range.
+`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand on a port in the range. A server started by hand on the default port 3000 shows up as `unpublished` and cannot be reached from the Mac, because 3000 belongs to production on the host; start it with `PORT=41xx bin/dev` on a free port from the range, or use Paseo's `server` script.
 
 `push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
 
@@ -59,12 +59,12 @@ Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants w
     ]
   },
   "scripts": {
-    "server": { "type": "service", "command": "bin/rails server -p $PASEO_PORT" }
+    "server": { "type": "service", "command": "PORT=$PASEO_PORT bin/dev" }
   }
 }
 ```
 
-`worktree.servicePorts.range` bounds the ports Paseo will hand out to `service` scripts for this repo's worktrees; `worktree.setup` copies secrets into a new worktree before anything runs; `scripts.server` is the service Paseo starts and stops per worktree, binding to the `PASEO_PORT` it was allocated. Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from the main checkout into the new worktree. No `bundle install` and no application code belongs in a hook.
+`worktree.servicePorts.range` bounds the ports Paseo will hand out to `service` scripts for this repo's worktrees; `worktree.setup` copies secrets into a new worktree before anything runs; `scripts.server` is the service Paseo starts and stops per worktree, binding to the `PASEO_PORT` it was allocated: Rails and `bin/dev` read `PORT`, so this starts the app on the port Paseo allocated from the range. Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from the main checkout into the new worktree. No `bundle install` and no application code belongs in a hook.
 
 ## Secrets
 

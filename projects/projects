@@ -56,7 +56,7 @@ case "$command" in
   ls|stop|start|restart|build) remote "$command" "$@" ;;
   secrets) cmd_secrets "$@" ;;
   open) cmd_open "$@" ;;
-  sync) ssh "$HOST" 'git -C ~/vinceworks pull --ff-only' ;;
+  sync) ssh "$HOST" 'git -C ~/vinceworks pull --ff-only origin main' ;;
   -h|--help|help) usage ;;
   *) remote_tty attach "$command" "$@" ;;
 esac

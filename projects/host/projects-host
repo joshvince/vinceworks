@@ -141,6 +141,9 @@ development_hosts() {
 
 cmd_build() {
   echo "Building $IMAGE..."
+  local branch
+  branch=$(git -C "$VINCEWORKS" rev-parse --abbrev-ref HEAD)
+  [[ "$branch" == main ]] || log warn "vinceworks on the host is on '$branch', not main; building from that"
   git -C "$VINCEWORKS" pull --ff-only --quiet || log warn "could not pull vinceworks, building from current checkout"
   "$ENGINE" build -t "$IMAGE" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" "$VINCEWORKS/projects"
   log ok "$IMAGE"

@@ -1,6 +1,13 @@
 # Vinceworks
 
-Personal dotfiles and tooling, managed via symlinks so changes sync across machines through git.
+This is a repo handling most of what I need to develop software. It started as a classic dotfiles repo, but has grown in ambition with the advent of [automatic programming](https://antirez.com/news/159) aka vibecoding.  
+
+The repo now houses a broad CLI-esque program that I can use to:
+
+- setup a new or sync dev machines with my preferred dev tool settings, including terminals, AI harnesses etc
+- maintain 'agent definitions' or system prompts I use when writing code with AI
+- create 'remote' dev environments on my home server for my own projects that allow agents a sandboxed environment to do the heavy lifting
+
 
 ## Commands
 

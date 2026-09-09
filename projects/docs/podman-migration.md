@@ -19,10 +19,12 @@ The socket (`/run/user/1000/podman/podman.sock`) is worth enabling anyway, but o
 Podman can run as root and behave almost exactly like Docker, including uid mapping. Rootless is the better fit here:
 
 - The setup already goes out of its way to keep a coding agent inside the container away from the host — only the ssh-agent socket goes in, never the private key. Rootless extends that: a container escape lands on an unprivileged user, not root.
-- Membership of the `docker` group is root-equivalent on the host. Dropping it is a real gain.
+- Membership of the `docker` group is root-equivalent on the host. Dropping it would be a real gain, though not yet — see the note below.
 - The scripts stay free of `sudo`.
 
-Keep the weighting honest, though. On a home box serving private applications behind an outbound-only tunnel, the container-escape scenario is theoretical. The concrete wins are dropping a root-equivalent group and losing the daemon; the hardening is a bonus, not the reason.
+Keep the weighting honest, though. On a home box serving private applications behind an outbound-only tunnel, the container-escape scenario is theoretical. The concrete win available today is losing the daemon; the hardening is a bonus, not the reason.
+
+The `docker` group is not a win yet. postcard still runs on Docker and is administered as `josh`, so removing `josh` from that group would put `sudo` in front of every `docker ps`, `docker compose up` and log check on production. That trade is not worth making to close a theoretical gap. The group can go when postcard moves off Docker too, and not before.
 
 The cost is two things rootful would not need: `--userns=keep-id` for bind-mount ownership, and lingering so containers survive SSH logout. Both are one-time host setup.
 
@@ -182,7 +184,9 @@ This is the gate for calling the migration done and deleting the Docker-side dev
 - [ ] **reboot the box deliberately** and confirm the container comes back on the next `attach`. This is the real test of lingering and of dropping `--restart`; do it on purpose rather than waiting for a reboot to happen
 - [ ] postcard and Filebrowser still serve after that reboot
 
-Once every box is ticked, remove `josh` from the `docker` group, and delete the old dev-side Docker volumes (`projects-mise`, `projects-claude`, `projects-gh`, `projects-go`, `project-vincetagram-pg`) and the dead `project-vincetagram` container. Leave Docker itself installed and leave `postcard_postgres_data` alone — production still needs both.
+Once every box is ticked, delete the old dev-side Docker volumes (`projects-mise`, `projects-claude`, `projects-gh`, `projects-go`, `project-vincetagram-pg`) and the dead `project-vincetagram` container. Leave Docker itself installed and leave `postcard_postgres_data` alone — production still needs both.
+
+Leave `josh` in the `docker` group as well, for the reason given under "Rootless, not rootful".
 
 ## Coexistence with production on the same box
 

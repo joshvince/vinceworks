@@ -12,6 +12,7 @@ for f in .gitconfig .gitmessage.txt .gitignore_global; do
   cp "$vinceworks/$f" "$HOME/$f"
 done
 cp "$vinceworks/sandbox/zshrc" "$HOME/.zshrc"
+cp "$vinceworks/sandbox/zshenv" "$HOME/.zshenv"
 cp "$vinceworks/sandbox/tmux.conf" "$HOME/.tmux.conf"
 git config --global --unset-all credential.helper 2>/dev/null || true
 

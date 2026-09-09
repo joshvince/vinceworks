@@ -1,5 +1,4 @@
 # Container-only zshrc. The macOS .zshrc in vinceworks is not reusable here.
-export PATH="$HOME/.local/bin:$PATH"
 eval "$(mise activate zsh)"
 
 HISTFILE="$HOME/.zsh_history"

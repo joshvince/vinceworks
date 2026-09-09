@@ -102,7 +102,7 @@ On the Mac:
 
 ## What happens on container start
 
-1. Copy `.gitconfig`, `.gitmessage.txt`, `.gitignore_global`, `sandbox/zshrc` (to `~/.zshrc`) and `sandbox/tmux.conf` (to `~/.tmux.conf`) from the read-only vinceworks mount, and unset the macOS git credential helper.
+1. Copy `.gitconfig`, `.gitmessage.txt`, `.gitignore_global`, `sandbox/zshrc` (to `~/.zshrc`), `sandbox/zshenv` (to `~/.zshenv`) and `sandbox/tmux.conf` (to `~/.tmux.conf`) from the read-only vinceworks mount, and unset the macOS git credential helper.
 2. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
 3. Ensure `~/projects` and `~/.ssh/sshd` exist. Generate an ed25519 sshd host key into `~/.ssh/sshd/` the first time, and seed `~/.ssh/sshd/authorized_keys` from the vinceworks mount the first time.
 4. Start Postgres and create a superuser role for `josh` if it does not exist yet.
@@ -125,6 +125,7 @@ sandbox/
   host/sandbox-host           host-side script: build, install-unit, up, rebuild, status
   tmux.conf                   copied to ~/.tmux.conf on every start
   zshrc                       copied to ~/.zshrc on every start
+  zshenv                      copied to ~/.zshenv on every start
 ```
 
 Host state outside git:

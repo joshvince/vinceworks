@@ -1,0 +1,2 @@
+# Sourced by every zsh, including non-interactive ssh commands, so ~/.local/bin is always on PATH.
+export PATH="$HOME/.local/bin:$PATH"

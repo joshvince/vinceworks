@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. Lists every Paseo worktree and every listener on
+# the published port range, merged by port.
+set -euo pipefail
+
+PROJECTS_ROOT="$HOME/projects"
+PASEO_ROOT="$HOME/.paseo/worktrees"
+
+declare -A W_PROJECT W_BRANCH L_PROJECT L_BRANCH
+
+for wt_json in "$PROJECTS_ROOT"/*/.git/worktrees/*/paseo/worktree.json; do
+  [[ -f "$wt_json" ]] || continue
+  wt_admin_dir=${wt_json%/paseo/worktree.json}          # .git/worktrees/<wt>
+  gitdir_file="$wt_admin_dir/gitdir"
+  [[ -f "$gitdir_file" ]] || continue
+  wt_path=$(cat "$gitdir_file"); wt_path=${wt_path%/*}   # dirname of the .git file
+  [[ -d "$wt_path" ]] || continue
+  port=$(jq -r '.runtime.worktreePort // empty' "$wt_json" 2>/dev/null || true)
+  [[ -n "$port" ]] || continue
+  repo_dir=${wt_admin_dir%/.git/worktrees/*}
+  project=$(basename "$repo_dir")
+  wt_name=$(basename "$wt_admin_dir")
+  branch=$(git -C "$wt_path" branch --show-current 2>/dev/null || true)
+  [[ -n "$branch" ]] || branch=$wt_name
+  W_PROJECT[$port]=$project
+  W_BRANCH[$port]=$branch
+done
+
+while read -r _state _recvq _sendq laddr _raddr proc; do
+  port=${laddr##*:}
+  [[ "$port" =~ ^[0-9]+$ ]] || continue
+  (( port >= 4100 && port <= 4199 )) || continue
+  [[ "$proc" =~ pid=([0-9]+) ]] || continue
+  pid=${BASH_REMATCH[1]}
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+  [[ -n "$cwd" ]] || continue
+  if [[ "$cwd" == "$PROJECTS_ROOT"/* ]]; then
+    rel=${cwd#"$PROJECTS_ROOT"/}
+    project=${rel%%/*}
+    branch=$(git -C "$cwd" branch --show-current 2>/dev/null || true)
+  elif [[ "$cwd" == "$PASEO_ROOT"/* ]]; then
+    common_dir=$(git -C "$cwd" rev-parse --git-common-dir 2>/dev/null || true)
+    if [[ -n "$common_dir" ]]; then
+      [[ "$common_dir" == /* ]] || common_dir="$cwd/$common_dir"
+      project=$(basename "$(dirname "$(cd "$common_dir" && pwd)")")
+    else
+      project="?"
+    fi
+    branch=$(git -C "$cwd" branch --show-current 2>/dev/null || true)
+  else
+    project="?"
+    branch="$cwd"
+  fi
+  [[ -n "${branch:-}" ]] || branch="?"
+  L_PROJECT[$port]=$project
+  L_BRANCH[$port]=$branch
+done < <(ss -ltnpH)
+
+mapfile -t ports < <(printf '%s\n' "${!W_PROJECT[@]}" "${!L_PROJECT[@]}" | sort -nu)
+
+if (( ${#ports[@]} == 0 )); then
+  echo "no worktrees and nothing listening on 4100-4199"
+  exit 0
+fi
+
+printf '%-15s%-24s%-6s%-10s%s\n' PROJECT BRANCH PORT STATE URL
+for port in "${ports[@]}"; do
+  if [[ -v W_PROJECT[$port] ]]; then project=${W_PROJECT[$port]}; branch=${W_BRANCH[$port]}
+  else project=${L_PROJECT[$port]}; branch=${L_BRANCH[$port]}; fi
+  if [[ -v L_PROJECT[$port] ]]; then state=listening; url="http://192.168.1.200:$port"
+  else state=idle; url=""; fi
+  printf '%-15s%-24s%-6s%-10s%s\n' "$project" "$branch" "$port" "$state" "$url"
+done

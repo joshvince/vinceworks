@@ -16,6 +16,7 @@ usage: vinceworks sandbox <command> [args]
   vinceworks sandbox rebuild                      rebuild the image and restart the sandbox
   vinceworks sandbox status                       show systemd status for the sandbox
   vinceworks sandbox push <url|name> [paths...]   clone a repo into the sandbox if needed and copy its secret files in
+  vinceworks sandbox ps                     list worktrees, their ports and what is listening
 USAGE
   exit 1
 }
@@ -71,6 +72,7 @@ shift
 case "$command" in
   up|rebuild|status) remote "$command" ;;
   push) cmd_push "$@" ;;
+  ps) ssh "$SSH_HOST" '~/vinceworks/sandbox/ps' ;;
   -h|--help|help) usage ;;
   *) usage ;;
 esac

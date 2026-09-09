@@ -27,8 +27,11 @@ vinceworks sandbox up                     # start the sandbox, building it first
 vinceworks sandbox rebuild                # rebuild the image and restart the sandbox
 vinceworks sandbox status                 # show systemd status for the sandbox
 vinceworks sandbox push <url|name> [paths...] # clone a repo into the sandbox if needed and copy its secret files in
+vinceworks sandbox ps                     # list worktrees, their ports and what is listening
 vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
+
+Ports come from Paseo's per-worktree allocation inside the 4100 to 4199 range, so a row is only reachable from the Mac when the app binds `PASEO_WORKTREE_PORT`.
 
 `push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
 

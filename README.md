@@ -18,11 +18,12 @@ After it completes, open a new shell and run `p10k configure` to set up your pro
 ---
 
 ### `vinceworks:update`
-**Run on an existing machine** to pick up changes from the repo — installs any new Homebrew packages and creates symlinks for any new dotfiles. Skips anything already in place.
+**Run on an existing machine** to pick up changes from the repo — creates symlinks for any new dotfiles and copies any new fonts. Skips anything already in place. Homebrew is left untouched unless you ask for it.
 
 ```sh
 vinceworks:update
-vinceworks:update --force   # also overwrite existing symlinks
+vinceworks:update --force      # also overwrite existing symlinks
+vinceworks:update --packages   # also run brew bundle for missing packages
 ```
 
 ---

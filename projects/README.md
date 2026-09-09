@@ -1,24 +1,24 @@
 # projects: per-project remote dev environments
 
-Each project gets its own development environment: one Docker container on the home Ubuntu box (`vince-archive`), with the repo, language toolchain, database, tmux and Claude Code inside. From the Mac, two commands do most of the work:
+Each project gets its own development environment: one rootless Podman container on the home Ubuntu box (`vince-archive`), with the repo, language toolchain, database, tmux and Claude Code inside. From the Mac, two commands do most of the work:
 
 ```sh
 vinceworks projects new joshvince/vincetagram   # clone, build, start, attach
 vinceworks projects vincetagram                 # attach to a running one
 ```
 
-The production services already on the box (vincetagram as `postcard`, Filebrowser, nginx) are untouched. They own host ports 80, 443, 3000, 5432 and 8080, and the port mapper below never allocates those.
+The production services already on the box (vincetagram as `postcard`, Filebrowser, nginx) are untouched. They own host ports 80, 443, 3000, 5432 and 8080, and the port mapper below never allocates those. Production stays on Docker while the development containers described here use Podman; the two engines coexist on the box with separate image stores.
 
 ## How it fits together
 
 - **One image for everything.** Ubuntu 24.04 plus build tools, `mise`, tmux, zsh, a Postgres server and Claude Code. Language versions come from each repo's own files (`.ruby-version`, `.node-version`, `.tool-versions`, `.go-version`, `go.mod`) at container start.
 - **One long-lived container per project**, named `project-<name>`, with the repo bind-mounted at `/home/josh/projects/<name>`. The path is the same inside and outside the container.
-- **Plain `docker run` from a bash script**, not compose. Every container is the same shape except for name, path and port.
+- **Plain `podman run` from a bash script**, not compose. Every container is the same shape except for name, path and port. The engine is selected by the `PROJECTS_ENGINE` environment variable, so `PROJECTS_ENGINE=docker` runs the same script against Docker without a code change.
 - **Postgres runs inside the container** and is never published to the host. Rails' default development config uses the Unix socket and the OS user, so most apps need no database config at all. Data lives in a per-project volume.
 - **tmux inside the container** holds your sessions. Detach and everything keeps running.
 - **Shared volumes:** `projects-mise` (Ruby, Node and Go installs plus gems, so a compiled Ruby is reused by every project), `projects-claude` (`~/.claude`, one login for all projects) and `projects-go`. Each project also gets `project-<name>-pg` for its database.
 - **Git works** through the box's ssh-agent. `start` loads a dedicated passphrase-less key, `~/.ssh/projects_ed25519`, into keychain and passes only the agent socket into the container. Containers never see the private key, so a coding agent inside cannot copy it. `gh` is installed and shares one login across containers via the `projects-gh` volume.
-- **Connecting** is SSH to the host, then `docker exec` into the container and attach tmux. There is no sshd inside containers. The box is reachable on the home LAN only for now; Tailscale is parked in `TODO.md`.
+- **Connecting** is SSH to the host, then `podman exec` into the container and attach tmux. There is no sshd inside containers. The box is reachable on the home LAN only for now; Tailscale is parked in `TODO.md`.
 
 ## Commands
 
@@ -44,7 +44,7 @@ Every app listens on port 3000 inside its own container. The host script maps on
 - Registry: `/home/josh/.projects/ports`, one line per project, `<name> <host-port>`.
 - Reserved and never allocated: 80, 443, 3000, 5432, 8080, plus any lines in `/home/josh/.projects/ports.reserved`.
 - Allocation starts at 4100 and steps by 10. It skips reserved ports, anything already in the registry, and anything `ss -ltn` shows bound on the host. The first free port wins.
-- `start` re-checks the port with `ss -ltn` immediately before `docker run` and aborts if something else has taken it. Docker refuses a bound port too, so production can never be displaced.
+- `start` re-checks the port with `ss -ltn` immediately before `podman run` and aborts if something else has taken it. Podman refuses a bound port too, so production can never be displaced.
 - Only `<host-port>:3000` is published. Postgres and anything else inside the container stays private.
 
 ## Secrets
@@ -87,9 +87,10 @@ Host state outside git:
 2. Copy `.gitconfig`, `.gitmessage.txt` and `.gitignore_global` from vinceworks, dropping the macOS credential helper.
 3. Point `gh` at SSH for git operations.
 4. Start Postgres and create a superuser role for `josh` if the project uses it (auto-detected from the Gemfile on `new`).
-5. `mise install` in the repo. The first Ruby compile takes 10 to 20 minutes and is cached in the shared volume after that. Node and Go are prebuilt and take seconds.
-6. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
-7. Create the tmux session `main` with windows `claude`, `server` and `shell`, then idle.
+5. `mise install` in the repo. The first Ruby compile takes about three minutes, measured, and is cached in the shared volume after that. Node and Go are prebuilt and take seconds.
+6. Install project dependencies: `bundle install` when the repo has a Gemfile.
+7. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
+8. Create the tmux session `main` with windows `claude`, `server` and `shell`, then idle.
 
 ## tmux in five minutes
 
@@ -116,7 +117,7 @@ C-a r        reload config                         tmux ls                      
 On the box:
 
 1. `id josh` should report uid 1000. The build passes the real uid and gid as build args either way.
-2. `groups josh` should include `docker`.
+2. Rootless Podman needs three things in place: `podman` itself installed; `/etc/subuid` and `/etc/subgid` each containing a range for `josh` (the default `josh:100000:65536` is what is there already and is fine as is); and lingering enabled for `josh` with `sudo loginctl enable-linger josh`. Lingering is not optional — without it, systemd tears down the user manager the moment the last SSH session for `josh` closes, and that takes every running container down with it.
 3. `mkdir -p /home/josh/projects /home/josh/.projects` and clone vinceworks to `/home/josh/vinceworks`.
 4. Create the GitHub key: `ssh-keygen -t ed25519 -N '' -C 'vince-archive projects' -f ~/.ssh/projects_ed25519`, then add `~/.ssh/projects_ed25519.pub` at github.com/settings/keys. `start` loads it into keychain automatically.
 5. Save the output of `ss -ltn` as the baseline of production ports.
@@ -129,10 +130,12 @@ On the Mac:
 
 - The first Ruby compile per version is slow. Logs stream during `new` so it does not look hung.
 - Ruby 3.1 and newer build against OpenSSL 3 on Ubuntu 24.04. Older Rubies would need extra work.
-- `ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid.
-- If a named volume ends up root-owned: `docker run --rm -v projects-claude:/v alpine chown -R 1000:1000 /v`.
+- `docker.io/library/ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid. The base image is fully qualified because Ubuntu's Podman ships no unqualified search registries, so an unqualified `ubuntu:24.04` fails the build.
+- If a named volume ends up root-owned: `podman unshare chown -R 1000:1000 "$(podman volume inspect projects-claude --format '{{.Mountpoint}}')"`. `podman unshare` enters the user namespace so the chown applies to the right uids.
 - Only `known_hosts` and the agent socket enter the container. If `git` inside a container says permission denied, check `ssh-add -l` on the box shows `projects_ed25519` and that the public key is on GitHub. Deleting the key on GitHub revokes the box instantly.
 - Rails 7.1 and newer block unknown hostnames in development. The container sets `RAILS_DEVELOPMENT_HOSTS` to cover `vince-archive` and the box's hostname.
 - Two containers running `bundle install` for the same Ruby at the same time can race on the shared gem directory. Rerun if it happens.
 - tmux state does not survive a container restart. The entrypoint recreates the three windows; running processes are gone.
 - One Postgres per container is a dev-only model. Add sidecar containers to `start` if a project needs Redis or a pinned Postgres version.
+- Containers are capped at 4 GB of memory and 4 CPUs, so that a runaway build or test suite on a shared box cannot starve production. Change the limits in the `run` invocation inside `cmd_start` if a project needs more.
+- The ssh-agent socket is bind mounted into the container by path, and that path changes every time the agent restarts, such as after a reboot. A container created against an old socket path can't be started again. `start` detects this and recreates the container instead of trying to restart it. Nothing is lost, because the entrypoint is idempotent and a reboot kills the running processes regardless.

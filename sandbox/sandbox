@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Mac-side CLI for the sandbox container. up/rebuild/status are one SSH call
-# to sandbox/host/sandbox-host on the box. push copies secrets in.
+# to sandbox/host/sandbox-host on the box. push clones a repo into the
+# sandbox if needed and copies its secret files in.
 set -euo pipefail
 
 HOST=${SANDBOX_HOST:-vince-archive}
@@ -11,28 +12,56 @@ usage() {
   cat <<USAGE
 usage: vinceworks sandbox <command> [args]
 
-  vinceworks sandbox up                     start the sandbox, building it first if needed
-  vinceworks sandbox rebuild                 rebuild the image and restart the sandbox
-  vinceworks sandbox status                  show systemd status for the sandbox
-  vinceworks sandbox push <repo> <paths...>  copy files from $LOCAL_PROJECTS/<repo> to the sandbox
+  vinceworks sandbox up                          start the sandbox, building it first if needed
+  vinceworks sandbox rebuild                      rebuild the image and restart the sandbox
+  vinceworks sandbox status                       show systemd status for the sandbox
+  vinceworks sandbox push <url|name> [paths...]   clone a repo into the sandbox if needed and copy its secret files in
 USAGE
   exit 1
 }
 
 remote() { ssh -t "$HOST" "\$HOME/vinceworks/sandbox/host/sandbox-host $1"; }
 
+copy_file() {
+  local dest="projects/$1/$2"
+  ssh "$SSH_HOST" "mkdir -p $(printf %q "$(dirname "$dest")")"
+  scp -q "$LOCAL_PROJECTS/$1/$2" "$SSH_HOST:$(printf %q "$dest")"
+  echo "  [copied] $2"
+}
+
 cmd_push() {
-  local repo=${1:?repo required}
+  local arg=${1:?url or name required} name url local_dir
   shift
-  [[ $# -gt 0 ]] || usage
-  for path in "$@"; do
-    local src="$LOCAL_PROJECTS/$repo/$path"
-    [[ -f "$src" ]] || { echo "  [error] $src not found" >&2; exit 1; }
-    local dest="projects/$repo/$path"
-    ssh "$SSH_HOST" "mkdir -p $(printf %q "$(dirname "$dest")")"
-    scp -q "$src" "$SSH_HOST:$(printf %q "$dest")"
-    echo "  [copied] $path"
-  done
+  if [[ "$arg" =~ ^(https?://|git@|ssh://) ]]; then
+    name=$(basename "$arg"); name=${name%.git}; url=$arg
+    local_dir="$LOCAL_PROJECTS/$name"
+    [[ -d "$local_dir" ]] || local_dir=""
+  else
+    local_dir="$LOCAL_PROJECTS/$arg"
+    [[ -d "$local_dir" ]] || { echo "  [error] $local_dir not found; pass a git URL to clone a repo you do not have locally" >&2; exit 1; }
+    name=$arg
+    url=$(git -C "$local_dir" remote get-url origin) || { echo "  [error] no origin remote for $local_dir" >&2; exit 1; }
+  fi
+  # Refuse rather than touch an existing checkout, so nothing in the sandbox is ever overwritten.
+  if ssh "$SSH_HOST" "[ -e ~/projects/$(printf %q "$name") ]"; then
+    echo "  [error] ~/projects/$name already exists in the sandbox; refusing to overwrite" >&2
+    exit 1
+  fi
+  ssh "$SSH_HOST" "git clone --quiet $(printf %q "$url") ~/projects/$(printf %q "$name")"
+  echo "  [cloned] $name"
+  if [[ $# -gt 0 ]]; then
+    for path in "$@"; do
+      [[ -f "$local_dir/$path" ]] || { echo "  [error] $local_dir/$path not found" >&2; exit 1; }
+      copy_file "$name" "$path"
+    done
+  elif [[ -z "$local_dir" ]]; then
+    echo "  [skip] no local checkout, nothing to copy"
+  else
+    for path in "$local_dir/.env" "$local_dir/config/master.key" "$local_dir"/config/credentials/*.key; do
+      [[ -f "$path" ]] || continue
+      copy_file "$name" "${path#"$local_dir"/}"
+    done
+  fi
 }
 
 command=${1:-}

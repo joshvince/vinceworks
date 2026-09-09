@@ -26,11 +26,11 @@ All run on the Mac.
 vinceworks sandbox up                     # start the sandbox, building it first if needed
 vinceworks sandbox rebuild                # rebuild the image and restart the sandbox
 vinceworks sandbox status                 # show systemd status for the sandbox
-vinceworks sandbox push <repo> <paths...> # copy files from ~/projects/<repo> on the Mac into the sandbox
-vinceworks tmux                           # ssh in and attach the "main" tmux session
+vinceworks sandbox push <url|name> [paths...] # clone a repo into the sandbox if needed and copy its secret files in
+vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
 
-To clone a new repo, run this inside the sandbox, over `vinceworks tmux` or a Paseo session:
+`push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
 
 ```sh
 gh repo clone owner/repo ~/projects/repo
@@ -62,13 +62,9 @@ Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from
 
 ## Secrets
 
-Files that are not committed to the repo, such as `.env` and `config/master.key`, live untracked in the main checkout on the sandbox, at `~/projects/<repo>/`. Push them from the Mac:
+`vinceworks sandbox push <url|name>` refuses to run if `~/projects/<name>` already exists in the sandbox, so it never overwrites a checkout or its secrets. It clones the repo when the path does not exist, then copies `.env`, `config/master.key` and `config/credentials/*.key` from `~/projects/<name>` on the Mac when that folder exists. Pass explicit repo-relative paths to copy other files, such as SQLite databases. A bare name uses the folder's `origin` URL; a URL works without any local checkout. To update a secret in an existing checkout, `scp` it by hand to `vinceworks-sandbox:projects/<name>/<path>`. Never push the production `.env`.
 
-```sh
-vinceworks sandbox push vincetagram .env config/master.key
-```
-
-A repo's `worktree.setup` hook then copies them out of the main checkout into every new worktree. Never push the production `.env`.
+A repo's `worktree.setup` hook then copies the pushed files out of the main checkout into every new worktree.
 
 ## Host prerequisites (once)
 

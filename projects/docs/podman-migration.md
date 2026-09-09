@@ -116,6 +116,10 @@ Decided: remove the flag rather than swap it for `--restart always`. `cmd_attach
 
 `keep-id` maps host josh to container josh one-to-one and both problems disappear.
 
+**Stop following the logs by hand rather than through a pipe.** `cmd_start` followed the entrypoint with `logs -f` piped into `sed '/^projects: ready$/q'`. Under Podman this hangs forever. The entrypoint prints its marker and then sleeps, so it never writes again; `sed` quits, but the follower is blocked on a read with nothing to write and so never receives SIGPIPE. Watch for the marker with a separate non-following `logs` call and kill the follower explicitly. Doing it that way also allows a timeout and a check for the container dying mid-start, neither of which the pipe version had.
+
+**Recreate a stopped container whose ssh-agent socket has gone.** The agent socket is bind mounted by path, and a bind mount source is fixed when the container is created. The agent gets a new path every time it restarts, so after a reboot the container refers to a socket that no longer exists and `start` fails with a mount error. Detect that case and recreate the container instead. This is not a Podman behaviour — Docker fixes bind mount sources at create time too, and would have failed the same way at boot, only silently under `--restart unless-stopped`.
+
 **Add resource caps.** The box has 15 GiB of RAM and one shared filesystem, so a runaway dev container is the most likely way production gets hurt — no escape or attacker required. Add to the `podman run`:
 
 ```
@@ -130,7 +134,7 @@ Everything else in the file is already Podman-compatible:
 | --- | --- |
 | `inspect -f '{{.State.Status}}'` | Same field, same template engine |
 | `ps --filter name='^project-'` | Podman's name filter is a regex too |
-| `logs -f ... \| sed '/^projects: ready$/q'` | Works; still exits on the marker line |
+| `logs -f ...` piped to `sed` | **Does not work.** See below |
 | `volume rm`, `image inspect`, `build --build-arg` | Identical |
 | `exec -it -w ... tmux new -A` | Identical |
 | `--init` | Podman uses catatonit instead of tini |

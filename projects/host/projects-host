@@ -108,6 +108,15 @@ ensure_agent() {
   source "$HOME/.keychain/$(hostname)-sh"
 }
 
+# The agent socket is bind mounted by path, and a bind mount source is fixed
+# when the container is created. The path changes every time the agent
+# restarts, so a container outlives its own mount and cannot be started again.
+agent_mount_stale() {
+  local source
+  source=$("$ENGINE" inspect -f '{{range .Mounts}}{{if eq .Destination "/ssh-agent"}}{{.Source}}{{end}}{{end}}' "$1" 2>/dev/null) || return 1
+  [[ -n "$source" && ! -S "$source" ]]
+}
+
 # Passes the running ssh-agent's socket into the container so git over SSH
 # works without the private key ever entering it.
 agent_socket_args() {
@@ -196,7 +205,16 @@ cmd_start() {
   case "$(container_status "$name")" in
     running) log ok "$container already running"; return ;;
     absent) ;;
-    *) "$ENGINE" start "$container" >/dev/null; log ok "$container started"; return ;;
+    *)
+      if agent_mount_stale "$container"; then
+        log warn "$container was created against an ssh-agent that is gone; recreating it"
+        "$ENGINE" rm "$container" >/dev/null
+      else
+        "$ENGINE" start "$container" >/dev/null
+        log ok "$container started"
+        return
+      fi
+      ;;
   esac
 
   if bound_ports | grep -qx "$PORT"; then
@@ -225,8 +243,26 @@ cmd_start() {
     -p "$PORT:3000" \
     "$IMAGE" >/dev/null
 
-  # Follow the entrypoint until it reports ready so the first Ruby compile is visible.
-  "$ENGINE" logs -f "$container" 2>&1 | sed '/^projects: ready$/q'
+  # Follow the entrypoint so the first Ruby compile is visible. The follower
+  # cannot be ended by a pipe to sed: the entrypoint sleeps forever once it is
+  # ready, so it never writes again and the follower never sees SIGPIPE. Watch
+  # for the marker separately and stop the follower by hand.
+  "$ENGINE" logs -f "$container" 2>&1 &
+  local logs_pid=$! waited=0
+  until "$ENGINE" logs "$container" 2>&1 | grep -q '^projects: ready$'; do
+    if [[ "$(container_status "$name")" != running ]]; then
+      kill "$logs_pid" 2>/dev/null || true
+      die "$container exited during start; see: $ENGINE logs $container"
+    fi
+    if [[ "$waited" -ge 1800 ]]; then
+      kill "$logs_pid" 2>/dev/null || true
+      die "$container did not report ready within 30 minutes"
+    fi
+    sleep 2
+    waited=$((waited + 2))
+  done
+  kill "$logs_pid" 2>/dev/null || true
+
   if [[ "$(container_status "$name")" != running ]]; then
     die "$container exited during start; see: $ENGINE logs $container"
   fi

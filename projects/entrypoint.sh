@@ -51,6 +51,12 @@ mise trust --yes 2>/dev/null || true
 mise install
 log ok "$(mise ls --current 2>/dev/null | awk '{print $1"@"$2}' | paste -sd' ' -)"
 
+echo "Installing project dependencies..."
+if [[ -f Gemfile ]]; then
+  mise exec -- bundle install || log warn "bundle install failed; run it by hand in the container"
+  log ok "bundle"
+fi
+
 echo "Installing AI tooling..."
 zsh "$vinceworks/ai.sh" >/dev/null
 log ok "agents and skills"

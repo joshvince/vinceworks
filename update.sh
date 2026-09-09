@@ -46,6 +46,11 @@ link "$HOME/vinceworks/Brewfile"          "$HOME/Brewfile"
 link "$HOME/vinceworks/.shortcuts"        "$HOME/.shortcuts"
 link "$HOME/vinceworks/.shortcuts.private" "$HOME/.shortcuts.private"
 
+if [[ -d "/Applications/Ghostty.app" ]]; then
+  mkdir -p "$HOME/.config/ghostty"
+  link "$HOME/vinceworks/terminal/config.ghostty" "$HOME/.config/ghostty/config.ghostty"
+fi
+
 # --- Fonts ---
 
 print "\nUpdating fonts..."

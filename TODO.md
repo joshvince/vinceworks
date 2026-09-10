@@ -3,7 +3,6 @@
 Ideas for later versions of the sandbox in `sandbox/`. Not committed to, just parked.
 
 
-- **fix the fact that specs rely on mise in the agent**. ask any agent to run rspec and you'll see the issue
 - **pi as the coding harness.** Replace Claude Code inside the container with pi.
 - **opencode go as the model provider for pi.**
 - **speak-like-you-eat or nopus with pi.**

@@ -41,7 +41,9 @@ Not verified: a host reboot. Nobody has rebooted the box since the unit was inst
 
 ## The immediate next task
 
-**Agents cannot run `rspec` or `bundle`.** A non-interactive shell has no toolchain, because `mise activate` runs from `.zshrc`, which only interactive shells read. `mise exec -- rspec` works, but no agent thinks to type that, and it cost time twice on 2026-09-10 while debugging the port work. The fix is one line: mise writes shims to `~/.local/share/mise/shims` and they resolve the project toolchain correctly from any directory, so adding that directory to `PATH` in `sandbox/zshenv` should fix it for agents, ssh commands and tmux alike. Test that the shims do not shadow anything unexpected before committing.
+Land the branches that are still out. vincetagram's `paseo.json`, its `Procfile.dev` fix and its development `.env` sit on the `romantic-leopard` worktree, unmerged. sterling_vault has not been converted at all. Once both are on `main` and the box has pulled them, PR #9 can merge and this file and `sandbox-plan.md` can go.
+
+Fixed on 2026-09-10, so it is no longer a blocker: agents could not run `rspec` or `bundle`, because `mise activate` runs from `.zshrc` and non-interactive shells never read it. `sandbox/zshenv` now appends `~/.local/share/mise/shims` to `PATH`. The shims resolve the project's own toolchain from any directory, verified over a plain ssh command in vincetagram, in one of its worktrees and in sterling_vault, which pin different Ruby versions. Appended rather than prepended, so nothing on `PATH` can ever be shadowed; none of the 42 shims collides with an existing command today, and the system `node` that the Paseo CLI and OpenCode depend on stays authoritative. Interactive shells are unaffected, still resolving through `mise activate`. The change is applied by hand to the running container as well as committed, so it survives until the next rebuild either way.
 
 ## Repo state, as of 2026-09-10
 

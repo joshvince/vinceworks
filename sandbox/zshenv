@@ -1,2 +1,11 @@
 # Sourced by every zsh, including non-interactive ssh commands, so ~/.local/bin is always on PATH.
 export PATH="$HOME/.local/bin:$PATH"
+
+# mise activate only runs from .zshrc, which non-interactive shells skip, so an
+# agent or an ssh command gets no toolchain and `bundle` and `rspec` are simply
+# missing. The shims resolve the right project version from any directory.
+# Appended rather than prepended: nothing on PATH is shadowed today, and if mise
+# ever manages node for a project, a node shim must not take precedence over the
+# system node that the Paseo CLI and OpenCode run on. MISE_DATA_DIR is not usable
+# here: the entrypoint appends it to this file below, so it is unset at this line.
+export PATH="$PATH:$HOME/.local/share/mise/shims"

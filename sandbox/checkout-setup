@@ -2,6 +2,7 @@
 # Runs inside the sandbox. The single entry point a worktree tool calls right
 # after creating a worktree: copies untracked secrets from the source
 # checkout, then allocates a PORT. Not Paseo-specific — reads no PASEO_* vars.
+# Reports every action on stdout, so a worktree tool's UI shows what it did.
 set -euo pipefail
 
 worktree=${1:?usage: checkout-setup <worktree> [source-checkout]}
@@ -14,22 +15,39 @@ if [[ -z "$source_checkout" ]]; then
     || { echo "checkout-setup: could not determine source checkout for $worktree" >&2; exit 1; }
 fi
 
-if [[ ! "$worktree" -ef "$source_checkout" ]]; then
+if [[ "$worktree" -ef "$source_checkout" ]]; then
+  echo "checkout-setup: $worktree is its own source checkout, copying nothing"
+else
+  echo "checkout-setup: copying secrets from $source_checkout"
   secrets=(.env config/master.key)
   while IFS= read -r -d '' key; do
     secrets+=("${key#"$source_checkout"/}")
   done < <(find "$source_checkout/config/credentials" -maxdepth 1 -name '*.key' -print0 2>/dev/null)
 
+  reported=0
   for rel in "${secrets[@]}"; do
     src="$source_checkout/$rel"
     dest="$worktree/$rel"
     [[ -f "$src" ]] || continue
-    [[ -e "$dest" ]] && continue         # never overwrite what the worktree already has
+    if [[ -e "$dest" ]]; then
+      echo "  kept $rel already in the worktree"   # never overwrite
+      reported=$((reported + 1))
+      continue
+    fi
     mkdir -p "$(dirname "$dest")"
     cp "$src" "$dest"
-    echo "checkout-setup: copied $rel" >&2
+    echo "  copied $rel"
+    reported=$((reported + 1))
   done
+  (( reported )) || echo "  no secrets found in the source checkout"
 fi
 
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-exec "$script_dir/alloc-port" "$worktree"
+notices=$(mktemp)
+trap 'rm -f "$notices"' EXIT
+if ! port=$("$script_dir/alloc-port" "$worktree" 2>"$notices"); then
+  cat "$notices" >&2
+  exit 1
+fi
+[[ -s "$notices" ]] && sed 's/^/  /' "$notices"
+echo "checkout-setup: PORT=$port in $worktree/.env"

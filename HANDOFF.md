@@ -27,7 +27,9 @@ Mac side: `~/.ssh/config` has a `vinceworks-sandbox` host on port 2222 using the
 
 Container starts and rebuilds without losing logins, repos, worktrees or the sshd host key. SSH from the Mac works. Production Postgres and the Docker socket are unreachable from inside. Killing the Paseo daemon restarts the container exactly once. A listener on a port in 4100 to 4199 inside a worktree is reachable from the Mac.
 
-`sandbox/alloc-port` and `sandbox/checkout-setup` were exercised inside the sandbox on 2026-09-10: fresh worktree setup, idempotent re-run, replacement of an out-of-range `PORT=3000`, replacement of an in-range port already claimed by another checkout, skipping a port with a live listener, and five concurrent allocations yielding five distinct ports.
+`sandbox/alloc-port` and `sandbox/checkout-setup` were exercised inside the sandbox on 2026-09-10: fresh worktree setup, idempotent re-run, replacement of an out-of-range `PORT=3000`, replacement of an in-range port already claimed by another checkout, skipping a port with a live listener, and five concurrent allocations yielding five distinct ports. Proven for real on a vincetagram worktree the same day, reachable from the Mac on its allocated port.
+
+Also settled on 2026-09-10: foreman's `.env` beats the environment it inherits, so `bin/dev` exporting `PORT="${PORT:-3000}"` before handing off does not defeat an allocated port. A `Procfile.dev` only needs changing when it pins the port itself, as vincetagram's did.
 
 Not verified: a host reboot. Nobody has rebooted the box since the unit was installed.
 
@@ -39,13 +41,19 @@ Not verified: a host reboot. Nobody has rebooted the box since the unit was inst
 
 ## The immediate next task
 
-Both remaining pieces are in other repos. vincetagram and sterling_vault each need their `paseo.json` rewritten to the shape documented in `sandbox/README.md`. And vincetagram's `Procfile.dev` hardcodes `web: bin/rails server -p 3000`, so `PORT` is ignored until it becomes `-p ${PORT:-3000}`; that is its own PR in vincetagram.
+**Agents cannot run `rspec` or `bundle`.** A non-interactive shell has no toolchain, because `mise activate` runs from `.zshrc`, which only interactive shells read. `mise exec -- rspec` works, but no agent thinks to type that, and it cost time twice on 2026-09-10 while debugging the port work. The fix is one line: mise writes shims to `~/.local/share/mise/shims` and they resolve the project toolchain correctly from any directory, so adding that directory to `PATH` in `sandbox/zshenv` should fix it for agents, ssh commands and tmux alike. Test that the shims do not shadow anything unexpected before committing.
 
-## Known issues, in `TODO.md`
+## Repo state, as of 2026-09-10
 
-**Agents cannot run `rspec` or `bundle`.** Confirmed: a non-interactive shell has no toolchain, because `mise activate` runs from `.zshrc`, which only interactive shells read. `mise exec -- rspec` works, but no agent thinks to type that. The fix is one line: mise writes shims to `~/.local/share/mise/shims` and they resolve the project toolchain correctly from any directory, so adding that directory to `PATH` in `sandbox/zshenv` should fix it for agents, ssh commands and tmux alike. Worth testing that shims do not shadow anything unexpected before committing.
+vincetagram works end to end. Its `paseo.json`, its `Procfile.dev` fix to `-p ${PORT:-3000}` and a development-only `.env` all live on the `romantic-leopard` worktree and are not merged to `main` yet, so `~/projects/vincetagram` still holds the old `Procfile.dev` and no `paseo.json` until that lands.
 
-The rest of `TODO.md` is parked: pi as the harness, Tailscale, a resolvable hostname.
+The `.env` originally pushed into vincetagram was the production file, complete with the production database password, the Kamal registry password and the Rails master key, against the rule in `sandbox/README.md`. The sandbox copy is now development-only. The Mac copy is still production, which is correct, since Kamal deploys from there. `sandbox push` will not re-copy it, because it refuses a checkout that already exists.
+
+sterling_vault is not converted. `~/projects/sterling_vault/paseo.json` still calls its own `script/paseo-worktree-setup.sh`, which copies secrets and allocates no port, and its `.env` there is still empty. Its `Procfile.dev` needs no change. Josh believes this is done, so it is probably sitting on a branch that has not reached the box.
+
+## Parked
+
+`TODO.md` holds pi as the harness, opencode-go as its model provider, Tailscale and a resolvable hostname for the box. Tailscale probably subsumes the hostname.
 
 ## Things learned the hard way
 

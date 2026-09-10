@@ -15,6 +15,7 @@ The container boundary is kept for one reason: production (`postcard` and its Po
 - **The Paseo daemon** listens on `127.0.0.1:6767` inside the container and is reached only through the sshd tunnel: Paseo's SSH transport runs `ssh -W 127.0.0.1:6767` against port 2222, it never starts or installs anything remotely. The entrypoint execs the daemon in the foreground as the container's main process, so killing it restarts the whole container.
 - **Postgres** runs inside the container as a system service, with data in the named volume `vinceworks-sandbox-pg`. Worktrees of one repo share one dev database, the same as on the laptop.
 - **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers, because production owns port 3000 on the host. vinceworks allocates these itself, not Paseo: `sandbox/alloc-port <dir>` picks a free port in that range and writes it into the checkout's `.env` as `PORT`, so Rails, foreman and dotenv all pick it up and the app is reachable from the Mac.
+- **Reachable off the home LAN via Tailscale.** The box, the Mac and the phone join the same tailnet. Because production shares this box, the Access Controls policy grants tailnet peers only `vince-archive:2222` and `vince-archive:4100-4199` — nothing else on the host is reachable over Tailscale, so joining the tailnet cannot expose production.
 - **Git works through `gh`.** There is no SSH key. A fine-grained GitHub PAT is logged in once with `gh auth login --with-token`, then `gh auth setup-git` points git's credential helper at it.
 - **Caps**: 3 CPUs, 10 GB of memory, set in the Quadlet unit's `PodmanArgs`.
 
@@ -41,11 +42,15 @@ gh repo clone owner/repo ~/projects/repo
 
 ## Paseo
 
-Add the sandbox as a host in Paseo Desktop on the Mac:
+Add the sandbox as a host in Paseo Desktop on the Mac, via "Remote SSH":
 
 ```
-ssh://josh@vince-archive:2222
+ssh://josh@vince-archive.tail1d48f4.ts.net:2222
 ```
+
+Paseo Desktop execs `ssh` with this address literally, not through a `~/.ssh/config` alias, so `~/.ssh/config` needs a `Host` block matching this exact hostname (not just the `vinceworks-sandbox` alias used elsewhere) with the right `IdentityFile`. The Tailscale hostname works both on and off the home LAN; the LAN IP only worked at home.
+
+The Paseo mobile app has no "Remote SSH" option — only relay pairing (QR code or link, from this host's Settings → Pair Device in Desktop) or a raw TCP direct connection. Relay is what gets agent control onto the phone. It does not carry the preview-port traffic below, which needs the phone joined to the same tailnet instead.
 
 Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants worktree support commits its own `paseo.json` at the repo root. For vincetagram:
 
@@ -86,17 +91,28 @@ On the box:
 
 On the Mac:
 
-4. Add a `vinceworks-sandbox` entry to `~/.ssh/config`, alongside the existing `vince-archive` entry:
+4. Join both the box and the Mac to the same Tailscale tailnet (the phone too, for the preview ports). In the tailnet's Access Controls, replace the default "allow all" starter policy — do not just add a grant alongside it, since Tailscale ACLs are allow-listed and the starter policy leaves every port on every device reachable, including production's, until it is deleted. Restrict tailnet peers to only `vince-archive:2222` and `vince-archive:4100-4199`.
+
+5. Add a `vinceworks-sandbox` entry to `~/.ssh/config`, using the Tailscale hostname so it works both on and off the home LAN:
 
    ```
    Host vinceworks-sandbox
-       HostName 192.168.1.200
+       HostName vince-archive.tail1d48f4.ts.net
        Port 2222
        User josh
        IdentityFile <same IdentityFile as your vince-archive entry>
    ```
 
-5. The same `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` lines that speed up `vince-archive` are worth adding under `Host vinceworks-sandbox` too, so repeated calls are instant.
+   Paseo Desktop's "Remote SSH" dialog execs `ssh` with the literal hostname typed into it, not this alias, so add a second block matching that exact hostname too:
+
+   ```
+   Host vince-archive.tail1d48f4.ts.net
+       User josh
+       IdentityFile <same IdentityFile as your vince-archive entry>
+       IdentitiesOnly yes
+   ```
+
+6. The same `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` lines that speed up `vince-archive` are worth adding under both new blocks too, so repeated calls are instant.
 
 ## First boot (once)
 
@@ -176,6 +192,7 @@ C-a r        reload config                         tmux ls                      
 - Rails 7.1 and newer block unknown hostnames in development. The Quadlet unit sets `RAILS_DEVELOPMENT_HOSTS` to cover the box's LAN IP and hostname.
 - Packages an agent installs with `apt` inside a running container do not survive `rebuild`, since `rebuild` throws away the container and starts a fresh one from the image. Anything installed through `mise`, or gems installed into the home, do survive, because they land in the bind-mounted home rather than the container's writable layer.
 - The sshd host key lives in the persistent home, not the image, so the Mac's `known_hosts` entry for `vinceworks-sandbox` stays valid across `rebuild`.
+- A Tailscale Access Controls policy is additive, allow-listed rules, not a firewall with a default-deny you layer rules onto. Adding a restrictive grant does nothing if the account's default "allow all" starter policy is still present — it has to be deleted, not just supplemented.
 - Worktrees of one repo share one dev database, the same as on the laptop. There is no per-worktree database.
 - The Paseo daemon runs as the container's main process. Killing it, including a crash, restarts the whole container: sshd and Postgres come back up too.
 - `~/vinceworks` inside the sandbox is the read-only mount of the box's own checkout, which the image builds from and the entrypoint copies dotfiles from. Paseo cannot create worktrees there. To work on vinceworks itself, clone it like any other project with `vinceworks sandbox push https://github.com/joshvince/vinceworks.git` and open `~/projects/vinceworks`.

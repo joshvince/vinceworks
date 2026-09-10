@@ -51,7 +51,7 @@ vincetagram works end to end. Its `paseo.json`, its `Procfile.dev` fix to `-p ${
 
 The `.env` originally pushed into vincetagram was the production file, complete with the production database password, the Kamal registry password and the Rails master key, against the rule in `sandbox/README.md`. The sandbox copy is now development-only. The Mac copy is still production, which is correct, since Kamal deploys from there. `sandbox push` will not re-copy it, because it refuses a checkout that already exists.
 
-sterling_vault is not converted. `~/projects/sterling_vault/paseo.json` still calls its own `script/paseo-worktree-setup.sh`, which copies secrets and allocates no port, and its `.env` there is still empty. Its `Procfile.dev` needs no change. Josh believes this is done, so it is probably sitting on a branch that has not reached the box.
+sterling_vault is converted and on `main`: `paseo.json` calls `checkout-setup` and the old `script/paseo-worktree-setup.sh` is deleted. Its `Procfile.dev` needs no change, because it never pinned a port. Its `.env` in the source checkout is empty, which is harmless — `checkout-setup` copies the empty file and `alloc-port` writes `PORT` into the worktree's copy.
 
 ## Parked
 

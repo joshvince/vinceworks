@@ -67,7 +67,7 @@ On the Mac:
 
    ```
    Host vinceworks-sandbox
-       HostName vince-archive.tail1d48f4.ts.net
+       HostName vince-archive.<tailnet>
        Port 2222
        User josh
        IdentityFile <same IdentityFile as your vince-archive entry>
@@ -76,7 +76,7 @@ On the Mac:
    Paseo Desktop's "Remote SSH" dialog runs `ssh` with the hostname exactly as typed, not through this alias, so add a second block that matches that exact hostname too:
 
    ```
-   Host vince-archive.tail1d48f4.ts.net
+   Host vince-archive.<tailnet>
        User josh
        IdentityFile <same IdentityFile as your vince-archive entry>
        IdentitiesOnly yes
@@ -87,7 +87,7 @@ On the Mac:
 7. Add the sandbox as a host in Paseo Desktop on the Mac, via "Remote SSH":
 
 ```
-ssh://josh@vince-archive.tail1d48f4.ts.net:2222
+ssh://josh@vince-archive.<tailnet>:2222
 ```
 
 ## First boot (once)

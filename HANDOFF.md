@@ -27,24 +27,19 @@ Mac side: `~/.ssh/config` has a `vinceworks-sandbox` host on port 2222 using the
 
 Container starts and rebuilds without losing logins, repos, worktrees or the sshd host key. SSH from the Mac works. Production Postgres and the Docker socket are unreachable from inside. Killing the Paseo daemon restarts the container exactly once. A listener on a port in 4100 to 4199 inside a worktree is reachable from the Mac.
 
+`sandbox/alloc-port` and `sandbox/checkout-setup` were exercised inside the sandbox on 2026-09-10: fresh worktree setup, idempotent re-run, replacement of an out-of-range `PORT=3000`, replacement of an in-range port already claimed by another checkout, skipping a port with a live listener, and five concurrent allocations yielding five distinct ports.
+
 Not verified: a host reboot. Nobody has rebooted the box since the unit was installed.
+
+## Port allocation
+
+`sandbox/alloc-port <dir>` writes a `PORT` in 4100-4199 into a directory's `.env`, treating every `.env` under `~/projects` and `~/.paseo/worktrees` as the allocation registry rather than keeping separate state. It takes an exclusive `flock` so concurrent worktree creation cannot collide, and it is idempotent: an in-range `PORT` is left alone, while an out-of-range or already-claimed one is replaced and the replacement logged to stderr.
+
+`sandbox/checkout-setup <worktree> [source-checkout]` is the entry point a worktree tool calls. It copies `.env`, `config/master.key` and `config/credentials/*.key` from the main checkout without overwriting anything, then calls `alloc-port`. It derives the source checkout from git when not given one, and reads no `PASEO_*` variables, so it is not Paseo-specific. `sandbox/README.md` documents the resulting `paseo.json`, down to a one-line `worktree.setup` adapter.
 
 ## The immediate next task
 
-Josh's last instruction, not started: write a script in the sandbox that prepares a new worktree, and have Paseo's `worktree.setup` hook call it.
-
-The point is that the logic lives in vinceworks, not in each repo's `paseo.json`, so that when Paseo is replaced by pi or anything else, only the one-line adapter changes. Josh explicitly rejected triggering it from a global git `post-checkout` hook. It is called by the tool, not by git.
-
-Proposed shape, agreed in conversation:
-
-- New file `sandbox/checkout-setup`, runnable inside the sandbox as `~/vinceworks/sandbox/checkout-setup`. Paseo exports `PASEO_SOURCE_CHECKOUT_PATH`, `PASEO_WORKTREE_PATH` and `PASEO_BRANCH_NAME` to setup commands, so the script should take the source checkout and the worktree as arguments rather than reading Paseo's variables directly.
-- It copies the untracked secret files from the source checkout into the worktree: `.env`, `config/master.key`, `config/credentials/*.key`. Never overwrite what is already there.
-- It picks a free TCP port in 4100 to 4199 and appends `PORT=<port>` to the worktree's `.env`. Free means not in `ss -ltn` and not already claimed by a `PORT=` line in another worktree's `.env`.
-- Each repo's `paseo.json` then reduces to the port range plus one setup line calling the script.
-
-Why the port matters: only 4100 to 4199 is published to the LAN, because production owns 3000 on the host. `vinceworks sandbox ps` marks anything else as `unpublished`.
-
-Blocker for Rails repos: `Procfile.dev` in vincetagram hardcodes `web: bin/rails server -p 3000`, so `PORT` is ignored. It needs to become `${PORT:-3000}`. That is a change in vincetagram, in its own PR, not in vinceworks.
+Both remaining pieces are in other repos. vincetagram and sterling_vault each need their `paseo.json` rewritten to the shape documented in `sandbox/README.md`. And vincetagram's `Procfile.dev` hardcodes `web: bin/rails server -p 3000`, so `PORT` is ignored until it becomes `-p ${PORT:-3000}`; that is its own PR in vincetagram.
 
 ## Known issues, in `TODO.md`
 

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. The single entry point a worktree tool calls right
+# after creating a worktree: copies untracked secrets from the source
+# checkout, then allocates a PORT. Not Paseo-specific — reads no PASEO_* vars.
+set -euo pipefail
+
+worktree=${1:?usage: checkout-setup <worktree> [source-checkout]}
+[[ -d "$worktree" ]] || { echo "checkout-setup: $worktree is not a directory" >&2; exit 1; }
+
+source_checkout=${2:-}
+if [[ -z "$source_checkout" ]]; then
+  source_checkout=$(git -C "$worktree" worktree list --porcelain | sed -n "1s/^worktree //p")
+  [[ -n "$source_checkout" && -d "$source_checkout" ]] \
+    || { echo "checkout-setup: could not determine source checkout for $worktree" >&2; exit 1; }
+fi
+
+if [[ ! "$worktree" -ef "$source_checkout" ]]; then
+  secrets=(.env config/master.key)
+  while IFS= read -r -d '' key; do
+    secrets+=("${key#"$source_checkout"/}")
+  done < <(find "$source_checkout/config/credentials" -maxdepth 1 -name '*.key' -print0 2>/dev/null)
+
+  for rel in "${secrets[@]}"; do
+    src="$source_checkout/$rel"
+    dest="$worktree/$rel"
+    [[ -f "$src" ]] || continue
+    [[ -e "$dest" ]] && continue         # never overwrite what the worktree already has
+    mkdir -p "$(dirname "$dest")"
+    cp "$src" "$dest"
+    echo "checkout-setup: copied $rel" >&2
+  done
+fi
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+exec "$script_dir/alloc-port" "$worktree"

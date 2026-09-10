@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. Assigns a PORT in the published range (4100-4199)
+# to a checkout or worktree's .env, or confirms its existing one still holds.
+# Idempotent by design so re-running setup never moves a running app's port.
+set -euo pipefail
+
+dir=${1:?usage: alloc-port <dir>}
+[[ -d "$dir" ]] || { echo "alloc-port: $dir is not a directory" >&2; exit 1; }
+
+LOCK=/tmp/vinceworks-alloc-port.lock
+exec 9>"$LOCK"
+flock -x 9                               # serializes concurrent worktree creation
+
+env_file="$dir/.env"
+
+# Scanned once up front: re-running the find per candidate port would walk
+# both repo trees a hundred times over.
+claimed=$(
+  while IFS= read -r f; do
+    [[ "$f" -ef "$env_file" ]] && continue
+    sed -n 's/^PORT=//p' "$f" 2>/dev/null
+  done < <(find "$HOME/projects" "$HOME/.paseo/worktrees" -maxdepth 4 -name .env 2>/dev/null)
+)
+
+listening=$(ss -ltnH 2>/dev/null | awk '{ n = split($4, a, ":"); print a[n] }')
+
+existing=""
+[[ -f "$env_file" ]] && existing=$(sed -n 's/^PORT=//p' "$env_file" | head -1)
+
+reason=""
+if [[ -n "$existing" ]]; then
+  if [[ "$existing" =~ ^[0-9]+$ ]] && (( existing >= 4100 && existing <= 4199 )); then
+    if ! grep -qxF "$existing" <<<"$claimed"; then
+      echo "$existing"
+      exit 0
+    fi
+    reason="already claimed by another checkout"
+  else
+    reason="outside 4100-4199"
+  fi
+fi
+
+new_port=""
+for p in $(seq 4100 4199); do
+  grep -qxF "$p" <<<"$listening" && continue
+  grep -qxF "$p" <<<"$claimed" && continue
+  new_port=$p
+  break
+done
+[[ -n "$new_port" ]] || { echo "alloc-port: no free port in 4100-4199" >&2; exit 1; }
+
+if [[ -f "$env_file" ]] && grep -q '^PORT=' "$env_file"; then
+  # cp -p first so the rewritten .env keeps the mode of the original secret.
+  tmp="$env_file.alloc-port.$$"
+  cp -p "$env_file" "$tmp"
+  awk -v p="$new_port" '{ if ($0 ~ /^PORT=/) print "PORT=" p; else print }' "$env_file" > "$tmp"
+  mv "$tmp" "$env_file"
+else
+  if [[ -s "$env_file" ]] && [[ -n "$(tail -c1 "$env_file")" ]]; then
+    printf '\n' >> "$env_file"           # avoid gluing onto a missing trailing newline
+  fi
+  printf 'PORT=%s\n' "$new_port" >> "$env_file"
+fi
+
+[[ -n "$reason" ]] && echo "alloc-port: replaced PORT=$existing ($reason) with PORT=$new_port" >&2
+
+echo "$new_port"

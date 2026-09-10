@@ -14,7 +14,7 @@ The container boundary is kept for one reason: production (`postcard` and its Po
 - **Unprivileged sshd on host port 2222**, running as `josh` inside the container. Host keys and `authorized_keys` live in the persistent home, not the image.
 - **The Paseo daemon** listens on `127.0.0.1:6767` inside the container and is reached only through the sshd tunnel: Paseo's SSH transport runs `ssh -W 127.0.0.1:6767` against port 2222, it never starts or installs anything remotely. The entrypoint execs the daemon in the foreground as the container's main process, so killing it restarts the whole container.
 - **Postgres** runs inside the container as a system service, with data in the named volume `vinceworks-sandbox-pg`. Worktrees of one repo share one dev database, the same as on the laptop.
-- **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers. A repo's `paseo.json` declares a `server` script of type `service` and sets `worktree.servicePorts.range` to `4100-4199`, so when Paseo starts that script it gets a port from the range as `PASEO_PORT` and the app is reachable from the Mac.
+- **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers, because production owns port 3000 on the host. vinceworks allocates these itself, not Paseo: `sandbox/alloc-port <dir>` picks a free port in that range and writes it into the checkout's `.env` as `PORT`, so Rails, foreman and dotenv all pick it up and the app is reachable from the Mac.
 - **Git works through `gh`.** There is no SSH key. A fine-grained GitHub PAT is logged in once with `gh auth login --with-token`, then `gh auth setup-git` points git's credential helper at it.
 - **Caps**: 3 CPUs, 10 GB of memory, set in the Quadlet unit's `PodmanArgs`.
 
@@ -31,7 +31,7 @@ vinceworks sandbox ps                     # list worktrees, their ports and what
 vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
 
-`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand on a port in the range. A server started by hand on the default port 3000 shows up as `unpublished` and cannot be reached from the Mac, because 3000 belongs to production on the host; start it with `PORT=41xx bin/dev` on a free port from the range, or use Paseo's `server` script.
+`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand in tmux. A server started by hand on the default port 3000 shows up as `unpublished` and cannot be reached from the Mac, because 3000 belongs to production on the host. Any checkout that has been through `checkout-setup` or `alloc-port` already carries a published `PORT` in its `.env` and `bin/dev` picks it up unprompted, so the fix for an `unpublished` row is to run `sandbox/alloc-port <dir>` against that checkout rather than to prefix the command by hand.
 
 `push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
 
@@ -52,19 +52,23 @@ Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants w
 ```json
 {
   "worktree": {
-    "servicePorts": { "range": "4100-4199" },
     "setup": [
-      "cp \"$PASEO_SOURCE_CHECKOUT_PATH/.env\" .env",
-      "cp \"$PASEO_SOURCE_CHECKOUT_PATH/config/master.key\" config/master.key"
+      "~/vinceworks/sandbox/checkout-setup \"$PASEO_WORKTREE_PATH\""
     ]
   },
   "scripts": {
-    "server": { "type": "service", "command": "PORT=$PASEO_PORT bin/dev" }
+    "server": { "type": "service", "command": "bin/dev" }
   }
 }
 ```
 
-`worktree.servicePorts.range` bounds the ports Paseo will hand out to `service` scripts for this repo's worktrees; `worktree.setup` copies secrets into a new worktree before anything runs; `scripts.server` is the service Paseo starts and stops per worktree, binding to the `PASEO_PORT` it was allocated: Rails and `bin/dev` read `PORT`, so this starts the app on the port Paseo allocated from the range. Hooks do plumbing only: copying `.env`, `config/master.key` or SQLite files from the main checkout into the new worktree. No `bundle install` and no application code belongs in a hook.
+`worktree.setup` is a single adapter line into vinceworks. `sandbox/checkout-setup <worktree> [source-checkout]` copies `.env`, `config/master.key` and `config/credentials/*.key` from the main checkout into the new worktree, never overwriting anything already there, then calls `sandbox/alloc-port`. With the source checkout omitted, as here, it is derived from git, so Paseo supplies only `$PASEO_WORKTREE_PATH`.
+
+`alloc-port` picks a port that is free in both `ss -ltn` and every other checkout's `.env`, and writes it in as `PORT`. It is idempotent: a port already in range is left alone, so a running app never has its port moved; one outside the range is replaced and the replacement logged. The `.env` files under `~/projects` and `~/.paseo/worktrees` are the allocation registry, so deleting a worktree frees its port and no separate state file can fall out of sync.
+
+`scripts.server` needs no `PASEO_PORT` prefix, because `.env` already carries `PORT`. Plain `bin/dev` reaches the allocated port whether Paseo started it or an agent typed it in tmux. The allocation logic lives in vinceworks rather than in this file, so replacing Paseo with another worktree tool means changing only the adapter line above.
+
+Hooks do plumbing only: secrets and SQLite files from the main checkout, nothing more. No `bundle install` and no application code belongs in one.
 
 ## Secrets
 
@@ -120,6 +124,8 @@ vinceworks                  top-level CLI: sandbox, tmux, update, ai, dev-machin
 sandbox/
   README.md                 this file
   sandbox                   Mac-side CLI: up, rebuild, status, push
+  alloc-port                picks a free port in 4100-4199 and writes it into a checkout's .env
+  checkout-setup            copies secrets into a new worktree, then calls alloc-port
   Dockerfile                the image
   entrypoint.sh              runs on every container start
   sandbox.container          Quadlet unit, installed to ~/.config/containers/systemd/ on the box

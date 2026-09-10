@@ -1,23 +1,10 @@
 # sandbox: one remote dev environment for every project
 
-`sandbox` is one rootless Podman container, `vinceworks-sandbox`, running on the home Ubuntu box (`vince-archive`). It holds every personal project checkout, a Postgres server, tmux and Claude Code, and it behaves like a second laptop: agents run inside it with very high autonomy, using Paseo worktrees for parallel sessions, opening PRs that get reviewed and deployed from the Mac.
+`sandbox` is a single rootless Podman container, `vinceworks-sandbox`, running on the home Ubuntu box (`vince-archive`). It holds every personal project checkout, a Postgres server, tmux and Claude Code. It behaves like a second laptop: agents run inside it with a lot of autonomy, using Paseo worktrees to work on several things at once and opening PRs that are reviewed and deployed from the Mac. It is reachable from anywhere, not just the home network. Paseo Desktop and the Paseo mobile app connect in to control agents, and Tailscale makes the dev servers running inside it reachable from the Mac or phone when away from home.
 
-One container rather than one per project. The per-project model in the old `projects/` directory turned out to be the source of nearly all the complexity: a port mapper, a per-project secrets directory, a per-project Postgres volume, stale ssh-agent socket detection, and shims to route a host-level Paseo daemon into the right container. It also meant one project's container could not see another project's checkout, which made intertwined projects awkward. The goal was never per-project isolation, so a single stable machine with a fraction of the moving parts serves it better.
+There is one container, not one per project. The per-project setup in the old `projects/` directory caused nearly all of the complexity: a port mapper, a secrets directory per project, a Postgres volume per project, detection of stale ssh-agent sockets, and shims to route a host-level Paseo daemon into the right container. It also meant one project's container could not see another project's checkout, which was awkward when projects depended on each other. Isolating projects from each other was never the goal. A single stable machine with far fewer moving parts serves the real goal better.
 
-The container boundary is kept for one reason: production (`postcard` and its Postgres on host loopback 5432, nginx, Filebrowser) shares the box. The sandbox has its own network namespace, no host network, no Docker socket and no volumes shared with production, so agents running inside it cannot reach production.
-
-## How it fits together
-
-- **One rebuildable image.** Ubuntu 24.04 plus build tools, `mise`, a Postgres server, Node 22, and OpenCode and the Paseo CLI as npm globals on a system path (because the bind-mounted home would hide anything a curl installer wrote there at build time). Claude Code is installed by `ai.sh` with the native installer into the persistent home on first start, so it self-updates with `claude update` and survives rebuilds.
-- **A persistent home**, bind-mounted from `/home/josh/vinceworks-sandbox` on the host to `/home/josh` in the container, with the container user taking uid 1000 via `--userns=keep-id`. Everything that should survive a rebuild (repos, gems, mise installs, sshd keys, Paseo state) lives there.
-- **A Quadlet unit** at `~/.config/containers/systemd/vinceworks-sandbox.container` with `Restart=always`, so the container comes back after `systemctl --user start` and after a host reboot. Linger is enabled for `josh` so the user manager stays up with no session attached.
-- **Unprivileged sshd on host port 2222**, running as `josh` inside the container. Host keys and `authorized_keys` live in the persistent home, not the image.
-- **The Paseo daemon** listens on `127.0.0.1:6767` inside the container and is reached only through the sshd tunnel: Paseo's SSH transport runs `ssh -W 127.0.0.1:6767` against port 2222, it never starts or installs anything remotely. The entrypoint execs the daemon in the foreground as the container's main process, so killing it restarts the whole container.
-- **Postgres** runs inside the container as a system service, with data in the named volume `vinceworks-sandbox-pg`. Worktrees of one repo share one dev database, the same as on the laptop.
-- **Ports**: 2222 for sshd, and 4100 to 4199 published for dev servers, because production owns port 3000 on the host. vinceworks allocates these itself, not Paseo: `sandbox/alloc-port <dir>` picks a free port in that range and writes it into the checkout's `.env` as `PORT`, so Rails, foreman and dotenv all pick it up and the app is reachable from the Mac.
-- **Reachable off the home LAN via Tailscale.** The box, the Mac and the phone join the same tailnet. Because production shares this box, the Access Controls policy grants tailnet peers only `vince-archive:2222` and `vince-archive:4100-4199` — nothing else on the host is reachable over Tailscale, so joining the tailnet cannot expose production.
-- **Git works through `gh`.** There is no SSH key. A fine-grained GitHub PAT is logged in once with `gh auth login --with-token`, then `gh auth setup-git` points git's credential helper at it.
-- **Caps**: 3 CPUs, 10 GB of memory, set in the Quadlet unit's `PodmanArgs`.
+The container boundary exists for one reason: production shares the box (`postcard` and its Postgres on host loopback 5432, nginx, Filebrowser). The sandbox has its own network namespace, no host network, no Docker socket and no volumes shared with production. Agents running inside it cannot reach production.
 
 ## Commands
 
@@ -32,9 +19,9 @@ vinceworks sandbox ps                     # list worktrees, their ports and what
 vinceworks tmux                               # ssh in and attach the "main" tmux session
 ```
 
-`ps` reports what is actually listening in the published range, mapped back to the checkout it runs from, so a row is reachable from the Mac whether the app was started by Paseo's `server` script or by hand in tmux. A server started by hand on the default port 3000 shows up as `unpublished` and cannot be reached from the Mac, because 3000 belongs to production on the host. Any checkout that has been through `checkout-setup` or `alloc-port` already carries a published `PORT` in its `.env` and `bin/dev` picks it up unprompted, so the fix for an `unpublished` row is to run `sandbox/alloc-port <dir>` against that checkout rather than to prefix the command by hand.
+`ps` shows what is actually listening in the published port range and which checkout each server runs from. Every row it lists is reachable from the Mac, whether the app was started by Paseo's `server` script or by hand in tmux. A server started by hand on the default port 3000 shows up as `unpublished` and cannot be reached from the Mac, because 3000 belongs to production on the host. Any checkout that has been through `checkout-setup` or `alloc-port` already has a published `PORT` in its `.env`, and `bin/dev` picks it up on its own. So the fix for an `unpublished` row is to run `sandbox/alloc-port <dir>` against that checkout, not to set the port by hand on the command line.
 
-`push` clones the repo, so a new one no longer needs to be cloned by hand first. To clone one inside the sandbox instead, run this over `vinceworks tmux` or a Paseo session:
+`push` clones the repo for you, so there is no need to clone a new one by hand first. If you would rather clone from inside the sandbox, run this over `vinceworks tmux` or in a Paseo session:
 
 ```sh
 gh repo clone owner/repo ~/projects/repo
@@ -48,11 +35,11 @@ Add the sandbox as a host in Paseo Desktop on the Mac, via "Remote SSH":
 ssh://josh@vince-archive.tail1d48f4.ts.net:2222
 ```
 
-Paseo Desktop execs `ssh` with this address literally, not through a `~/.ssh/config` alias, so `~/.ssh/config` needs a `Host` block matching this exact hostname (not just the `vinceworks-sandbox` alias used elsewhere) with the right `IdentityFile`. The Tailscale hostname works both on and off the home LAN; the LAN IP only worked at home.
+Paseo Desktop runs `ssh` with this exact address, not through a `~/.ssh/config` alias. So `~/.ssh/config` needs a `Host` block that matches this exact hostname and sets the right `IdentityFile`; the `vinceworks-sandbox` alias used elsewhere is not enough on its own. The Tailscale hostname works both at home and away; the LAN IP only worked at home.
 
-The Paseo mobile app has no "Remote SSH" option — only relay pairing (QR code or link, from this host's Settings → Pair Device in Desktop) or a raw TCP direct connection. Relay is what gets agent control onto the phone. It does not carry the preview-port traffic below, which needs the phone joined to the same tailnet instead.
+The Paseo mobile app has no "Remote SSH" option. It offers only relay pairing (by QR code or link, from this host's Settings → Pair Device in Desktop) or a raw TCP direct connection. Relay is what puts agent control on the phone. It does not carry the preview-port traffic described below; for that, the phone needs to be on the same tailnet.
 
-Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants worktree support commits its own `paseo.json` at the repo root. For vincetagram:
+Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants worktree support commits its own `paseo.json` at the root of the repo. Here is vincetagram's:
 
 ```json
 {
@@ -67,33 +54,33 @@ Worktrees live under `~/.paseo/worktrees` in the sandbox. Each repo that wants w
 }
 ```
 
-`worktree.setup` is a single adapter line into vinceworks. `sandbox/checkout-setup <worktree> [source-checkout]` copies `.env`, `config/master.key` and `config/credentials/*.key` from the main checkout into the new worktree, never overwriting anything already there, then calls `sandbox/alloc-port`. With the source checkout omitted, as here, it is derived from git, so Paseo supplies only `$PASEO_WORKTREE_PATH`.
+`worktree.setup` is a single line that hands off to vinceworks. `sandbox/checkout-setup <worktree> [source-checkout]` copies `.env`, `config/master.key` and `config/credentials/*.key` from the main checkout into the new worktree, never overwriting anything already there, and then calls `sandbox/alloc-port`. When the source checkout is left out, as it is here, the script works it out from git, so Paseo only has to supply `$PASEO_WORKTREE_PATH`.
 
-`alloc-port` picks a port that is free in both `ss -ltn` and every other checkout's `.env`, and writes it in as `PORT`. It is idempotent: a port already in range is left alone, so a running app never has its port moved; one outside the range is replaced and the replacement logged. The `.env` files under `~/projects` and `~/.paseo/worktrees` are the allocation registry, so deleting a worktree frees its port and no separate state file can fall out of sync.
+`alloc-port` picks a port that is free according to both `ss -ltn` and every other checkout's `.env`, and writes it into the worktree's `.env` as `PORT`. It is safe to run more than once. A port that is already in range is left alone, so a running app never has its port moved. A port outside the range is replaced, and the replacement is logged. The `.env` files under `~/projects` and `~/.paseo/worktrees` are the record of which ports are taken. Deleting a worktree frees its port, and there is no separate state file that could fall out of sync.
 
-`scripts.server` needs no `PASEO_PORT` prefix, because `.env` already carries `PORT`. Plain `bin/dev` reaches the allocated port whether Paseo started it or an agent typed it in tmux. The allocation logic lives in vinceworks rather than in this file, so replacing Paseo with another worktree tool means changing only the adapter line above.
+`scripts.server` needs no `PASEO_PORT` prefix, because `.env` already holds `PORT`. Plain `bin/dev` lands on the allocated port whether Paseo started it or an agent typed it in tmux. The port allocation logic lives in vinceworks rather than in `paseo.json`, so swapping Paseo for another worktree tool means changing only the one setup line above.
 
-Hooks do plumbing only: secrets and SQLite files from the main checkout, nothing more. No `bundle install` and no application code belongs in one.
+Hooks do plumbing only: they copy secrets and SQLite files from the main checkout, and nothing more. No `bundle install` and no application code belongs in a hook.
 
 ## Secrets
 
-`vinceworks sandbox push <url|name>` refuses to run if `~/projects/<name>` already exists in the sandbox, so it never overwrites a checkout or its secrets. It clones the repo when the path does not exist, then copies `.env`, `config/master.key` and `config/credentials/*.key` from `~/projects/<name>` on the Mac when that folder exists. Pass explicit repo-relative paths to copy other files, such as SQLite databases. A bare name uses the folder's `origin` URL; a URL works without any local checkout. To update a secret in an existing checkout, `scp` it by hand to `vinceworks-sandbox:projects/<name>/<path>`. Never push the production `.env`.
+`vinceworks sandbox push <url|name>` refuses to run if `~/projects/<name>` already exists in the sandbox, so it never overwrites a checkout or its secrets. Otherwise it clones the repo, then copies `.env`, `config/master.key` and `config/credentials/*.key` from `~/projects/<name>` on the Mac, if that folder exists. To copy other files too, such as SQLite databases, pass their repo-relative paths. Giving a bare name uses that Mac folder's `origin` URL; giving a URL works without any local checkout. To update a secret in an existing checkout, `scp` it by hand to `vinceworks-sandbox:projects/<name>/<path>`. Never push the production `.env`.
 
-A repo's `worktree.setup` hook then copies the pushed files out of the main checkout into every new worktree.
+The repo's `worktree.setup` hook then copies the pushed files from the main checkout into every new worktree.
 
 ## Host prerequisites (once)
 
 On the box:
 
-1. `id josh` should report uid 1000. The build passes the real uid and gid as build args either way.
-2. Rootless Podman needs three things in place: `podman` itself installed; `/etc/subuid` and `/etc/subgid` each containing a range for `josh` (the default `josh:100000:65536` is what is there already and is fine as is); and lingering enabled for `josh` with `sudo loginctl enable-linger josh`. Lingering is not optional. Without it, systemd tears down the user manager the moment the last SSH session for `josh` closes, and that takes the container down with it.
+1. `id josh` should report uid 1000. Either way, the build passes the real uid and gid in as build args.
+2. Rootless Podman needs three things: `podman` itself installed; a range for `josh` in each of `/etc/subuid` and `/etc/subgid` (the default `josh:100000:65536` is already there and is fine); and lingering enabled for `josh` with `sudo loginctl enable-linger josh`. Lingering is not optional. Without it, systemd shuts down the user manager as soon as the last SSH session for `josh` closes, and the container goes down with it.
 3. `mkdir -p ~/vinceworks-sandbox` and clone vinceworks to `~/vinceworks`.
 
 On the Mac:
 
-4. Join both the box and the Mac to the same Tailscale tailnet (the phone too, for the preview ports). In the tailnet's Access Controls, replace the default "allow all" starter policy — do not just add a grant alongside it, since Tailscale ACLs are allow-listed and the starter policy leaves every port on every device reachable, including production's, until it is deleted. Restrict tailnet peers to only `vince-archive:2222` and `vince-archive:4100-4199`.
+4. Join the box and the Mac to the same Tailscale tailnet (and the phone too, if you want the preview ports on it). In the tailnet's Access Controls, replace the default "allow all" starter policy rather than adding a grant next to it. Tailscale ACLs are allow lists, so as long as the starter policy is there, every port on every device stays reachable, production's included. Restrict tailnet peers to only `vince-archive:2222` and `vince-archive:4100-4199`.
 
-5. Add a `vinceworks-sandbox` entry to `~/.ssh/config`, using the Tailscale hostname so it works both on and off the home LAN:
+5. Add a `vinceworks-sandbox` entry to `~/.ssh/config`. Use the Tailscale hostname so it works both at home and away:
 
    ```
    Host vinceworks-sandbox
@@ -103,7 +90,7 @@ On the Mac:
        IdentityFile <same IdentityFile as your vince-archive entry>
    ```
 
-   Paseo Desktop's "Remote SSH" dialog execs `ssh` with the literal hostname typed into it, not this alias, so add a second block matching that exact hostname too:
+   Paseo Desktop's "Remote SSH" dialog runs `ssh` with the hostname exactly as typed, not through this alias, so add a second block that matches that exact hostname too:
 
    ```
    Host vince-archive.tail1d48f4.ts.net
@@ -112,7 +99,7 @@ On the Mac:
        IdentitiesOnly yes
    ```
 
-6. The same `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` lines that speed up `vince-archive` are worth adding under both new blocks too, so repeated calls are instant.
+6. Add the same `ControlMaster auto`, `ControlPath ~/.ssh/cm-%r@%h:%p` and `ControlPersist 10m` lines that speed up `vince-archive` under both new blocks too, so repeated connections are instant.
 
 ## First boot (once)
 
@@ -122,77 +109,6 @@ On the Mac:
 4. `claude` to log in to Claude Code.
 5. Copy `~/.paseo/config.json` from the Mac into `~/.paseo/` in the sandbox.
 
-## What happens on container start
+## tmux
 
-1. Copy `.gitconfig`, `.gitmessage.txt`, `.gitignore_global`, `sandbox/zshrc` (to `~/.zshrc`), `sandbox/zshenv` (to `~/.zshenv`) and `sandbox/tmux.conf` (to `~/.tmux.conf`) from the read-only vinceworks mount, and unset the macOS git credential helper.
-2. Run vinceworks' `ai.sh` so Claude Code has the shared agents and skills.
-3. Ensure `~/projects` and `~/.ssh/sshd` exist. Generate an ed25519 sshd host key into `~/.ssh/sshd/` the first time, and seed `~/.ssh/sshd/authorized_keys` from the vinceworks mount the first time.
-4. Start Postgres and create a superuser role for `josh` if it does not exist yet.
-5. Start sshd on port 2222.
-6. Run `gh auth setup-git` if `gh auth status` succeeds, so a rebuilt image picks the credential helper back up.
-7. `mise install` runs in every repo under `~/projects`, in the background, logging to `~/mise-install.log`, so a new Ruby version compiles without holding up sshd or Paseo.
-8. `exec paseo daemon start --foreground --listen 127.0.0.1:6767 --home ~/.paseo`, in the foreground as the container's main process.
-
-## Files
-
-```
-vinceworks                  top-level CLI: sandbox, tmux, update, ai, dev-machine-setup
-sandbox/
-  README.md                 this file
-  sandbox                   Mac-side CLI: up, rebuild, status, push
-  alloc-port                picks a free port in 4100-4199 and writes it into a checkout's .env
-  checkout-setup            copies secrets into a new worktree, then calls alloc-port
-  Dockerfile                the image
-  entrypoint.sh              runs on every container start
-  sandbox.container          Quadlet unit, installed to ~/.config/containers/systemd/ on the box
-  sshd_config                 unprivileged sshd config, copied into the image
-  authorized_keys             seeds ~/.ssh/sshd/authorized_keys the first time the sandbox starts
-  host/sandbox-host           host-side script: build, install-unit, up, rebuild, status
-  tmux.conf                   copied to ~/.tmux.conf on every start
-  zshrc                       copied to ~/.zshrc on every start
-  zshenv                      copied to ~/.zshenv on every start
-```
-
-Host state outside git:
-
-```
-/home/josh/vinceworks-sandbox/            the container's home
-/home/josh/vinceworks-sandbox/projects/   repos
-/home/josh/vinceworks-sandbox/.paseo/     daemon state, worktrees
-/home/josh/vinceworks-sandbox/.ssh/sshd/  sshd host keys and authorized_keys
-/home/josh/.config/containers/systemd/vinceworks-sandbox.container
-podman volume vinceworks-sandbox-pg
-```
-
-## tmux in five minutes
-
-The prefix is Ctrl+a, written `C-a` below.
-
-- A **window** is a tab. `C-a c` creates one, `C-a 1` to `C-a 9` jump, `C-a ,` renames, `C-a &` kills.
-- A **pane** is a split inside a window. `C-a |` splits right, `C-a -` splits below, `C-a` plus an arrow key moves, `C-a x` kills.
-- A **session** is a whole workspace. `main` is created for you by `vinceworks tmux`. Inside tmux, `C-a s` lists sessions to switch between; create another by hand with `tmux new -s foo`.
-- `C-a d` detaches. Nothing stops.
-
-```
-C-a d        detach, everything keeps running     vinceworks tmux                  reattach
-C-a c        new window                            C-a 1..9                         jump to window
-C-a n / p    next / previous window                C-a ,                            rename window
-C-a |  C-a - split right / split below             C-a arrows                       move between panes
-C-a x        kill pane                             C-a &                            kill window
-C-a s        pick a session                        tmux new -s foo                  new session foo, run inside the sandbox
-C-a [        scroll mode, q to quit                mouse                            click, scroll, resize
-C-a r        reload config                         tmux ls                          list sessions
-```
-
-## Gotchas
-
-- The first Ruby compile per version is slow, about three minutes. It is not hung, it is compiling. It now happens in the background at container start for every cloned repo, and a repo cloned after start gets its toolchain on first use through mise's auto-install.
-- Ruby 3.1 and newer build against OpenSSL 3 on Ubuntu 24.04. Older Rubies would need extra work.
-- `docker.io/library/ubuntu:24.04` ships an `ubuntu` user at uid 1000. The Dockerfile removes it so `josh` can take that uid. The base image is fully qualified because Ubuntu's Podman ships no unqualified search registries, so an unqualified `ubuntu:24.04` fails the build.
-- Rails 7.1 and newer block unknown hostnames in development. The Quadlet unit sets `RAILS_DEVELOPMENT_HOSTS` to cover the box's LAN IP and hostname.
-- Packages an agent installs with `apt` inside a running container do not survive `rebuild`, since `rebuild` throws away the container and starts a fresh one from the image. Anything installed through `mise`, or gems installed into the home, do survive, because they land in the bind-mounted home rather than the container's writable layer.
-- The sshd host key lives in the persistent home, not the image, so the Mac's `known_hosts` entry for `vinceworks-sandbox` stays valid across `rebuild`.
-- A Tailscale Access Controls policy is additive, allow-listed rules, not a firewall with a default-deny you layer rules onto. Adding a restrictive grant does nothing if the account's default "allow all" starter policy is still present — it has to be deleted, not just supplemented.
-- Worktrees of one repo share one dev database, the same as on the laptop. There is no per-worktree database.
-- The Paseo daemon runs as the container's main process. Killing it, including a crash, restarts the whole container: sshd and Postgres come back up too.
-- `~/vinceworks` inside the sandbox is the read-only mount of the box's own checkout, which the image builds from and the entrypoint copies dotfiles from. Paseo cannot create worktrees there. To work on vinceworks itself, clone it like any other project with `vinceworks sandbox push https://github.com/joshvince/vinceworks.git` and open `~/projects/vinceworks`.
+tmux inside the sandbox is configured by [`sandbox/tmux.conf`](tmux.conf). `vinceworks tmux` attaches the `main` session.

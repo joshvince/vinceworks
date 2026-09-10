@@ -1,0 +1,22 @@
+[Unit]
+Description=vinceworks sandbox
+
+[Container]
+Image=localhost/vinceworks-sandbox:latest
+ContainerName=vinceworks-sandbox
+HostName=vinceworks-sandbox
+UserNS=keep-id:uid=1000,gid=1000
+RunInit=yes
+Volume=/home/josh/vinceworks-sandbox:/home/josh
+Volume=/home/josh/vinceworks:/home/josh/vinceworks:ro
+Volume=vinceworks-sandbox-pg:/var/lib/postgresql
+PublishPort=2222:2222
+PublishPort=4100-4199:4100-4199
+Environment=RAILS_DEVELOPMENT_HOSTS=192.168.1.200,vince-archive
+PodmanArgs=--memory 10g --cpus 3
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

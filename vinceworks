@@ -8,10 +8,11 @@ usage() {
   cat <<USAGE
 usage: vinceworks <command> [args]
 
-  vinceworks projects [args]           per-project remote dev environments (see projects/README.md)
-  vinceworks update [args]             pick up dotfile and package changes on an existing machine
-  vinceworks ai [args]                 install AI tools and sync agents/skills
-  vinceworks dev-machine-setup         full setup for a fresh machine
+  vinceworks sandbox [args]             the agents' sandbox on the home server (see sandbox/README.md)
+  vinceworks tmux                       attach to tmux inside the sandbox
+  vinceworks update [args]              pick up dotfile and package changes on an existing machine
+  vinceworks ai [args]                  install AI tools and sync agents/skills
+  vinceworks dev-machine-setup          full setup for a fresh machine
 USAGE
   exit 1
 }
@@ -21,7 +22,9 @@ command=${1:-}
 shift
 
 case "$command" in
-  projects) exec "$VINCEWORKS_DIR/projects/projects" "$@" ;;
+  sandbox) exec "$VINCEWORKS_DIR/sandbox/sandbox" "$@" ;;
+  # Ghostty sends TERM=xterm-ghostty, which the container has no terminfo for, so tmux refuses to start.
+  tmux) exec ssh -t "${SANDBOX_SSH_HOST:-vinceworks-sandbox}" 'export TERM=xterm-256color; cd ~/projects && tmux new -A -s main' ;;
   update) exec "$VINCEWORKS_DIR/update.sh" "$@" ;;
   ai) exec "$VINCEWORKS_DIR/ai.sh" "$@" ;;
   dev-machine-setup) exec "$VINCEWORKS_DIR/dev-machine-setup.sh" "$@" ;;

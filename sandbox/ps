@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. Lists every checkout under ~/projects (main
+# checkouts and Paseo worktrees) alongside whatever is listening, matched
+# by working directory. Only the published port range (4100-4199) is
+# reachable from the Mac; listeners on other ports show as unpublished.
+set -euo pipefail
+
+PROJECTS_ROOT="$HOME/projects"
+listener_cwds=() listener_ports=()
+
+while read -r _state _recvq _sendq laddr _raddr proc; do
+  port=${laddr##*:}                      # strips the host part of both v4 and [v6]
+  [[ "$port" =~ ^[0-9]+$ ]] || continue
+  [[ "$proc" =~ pid=([0-9]+) ]] || continue
+  pid=${BASH_REMATCH[1]}
+  cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null || true)
+  [[ -n "$cwd" ]] || continue
+  dup=0
+  for seen_port in "${listener_ports[@]}"; do [[ "$seen_port" == "$port" ]] && dup=1 && break; done
+  (( dup )) && continue                  # same port seen on v4 and v6
+  listener_cwds+=("$cwd"); listener_ports+=("$port")
+done < <(ss -ltnpH)
+
+co_dirs=() co_projects=() co_branches=()
+for dir in "$PROJECTS_ROOT"/*/; do
+  [[ -d "$dir" ]] || continue
+  dir=${dir%/}
+  project=$(basename "$dir")
+  branch=$(git -C "$dir" branch --show-current 2>/dev/null || true)
+  co_dirs+=("$dir"); co_projects+=("$project"); co_branches+=("${branch:-detached}")
+  for gitdir_file in "$dir"/.git/worktrees/*/gitdir; do
+    [[ -e "$gitdir_file" ]] || continue
+    wt_path=$(dirname "$(cat "$gitdir_file")")
+    [[ -d "$wt_path" ]] || continue
+    wt_branch=$(git -C "$wt_path" branch --show-current 2>/dev/null || true)
+    co_dirs+=("$wt_path"); co_projects+=("$project"); co_branches+=("${wt_branch:-detached}")
+  done
+done
+
+if (( ${#co_dirs[@]} == 0 )); then
+  echo "no checkouts under ~/projects"
+  exit 0
+fi
+
+rows=() matched=()
+for _ in "${listener_ports[@]}"; do matched+=(0); done
+
+for c in "${!co_dirs[@]}"; do
+  dir=${co_dirs[$c]}
+  found=0
+  for i in "${!listener_ports[@]}"; do
+    cwd=${listener_cwds[$i]}
+    [[ "$cwd" == "$dir" || "$cwd" == "$dir"/* ]] || continue
+    port=${listener_ports[$i]}
+    if (( port >= 4100 && port <= 4199 )); then
+      rows+=("${co_projects[$c]}|${co_branches[$c]}|$port|listening|http://192.168.1.200:$port")
+    else
+      rows+=("${co_projects[$c]}|${co_branches[$c]}|$port|unpublished|")
+    fi
+    matched[$i]=1; found=1
+  done
+  (( found )) || rows+=("${co_projects[$c]}|${co_branches[$c]}||idle|")
+done
+
+for i in "${!listener_ports[@]}"; do
+  (( matched[$i] )) && continue
+  port=${listener_ports[$i]}
+  (( port >= 4100 && port <= 4199 )) || continue
+  rows+=("?|${listener_cwds[$i]}|$port|listening|http://192.168.1.200:$port")
+done
+
+printf '%-15s%-28s%-6s%-10s%s\n' PROJECT BRANCH PORT STATE URL
+printf '%s\n' "${rows[@]}" | sort -t'|' -k1,1 -k2,2 |
+while IFS='|' read -r project branch port state url; do
+  printf '%-15s%-28s%-6s%-10s%s\n' "$project" "$branch" "$port" "$state" "$url"
+done

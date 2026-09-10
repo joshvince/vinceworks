@@ -1,0 +1,72 @@
+#!/usr/bin/env bash
+# Host-side implementation of the sandbox container. Runs on the Ubuntu box
+# as josh. The Mac CLI in ../sandbox calls this over SSH.
+set -euo pipefail
+
+VINCEWORKS="$HOME/vinceworks"
+IMAGE=localhost/vinceworks-sandbox:latest
+UNIT=vinceworks-sandbox
+UNIT_DIR="$HOME/.config/containers/systemd"
+SANDBOX_HOME="$HOME/vinceworks-sandbox"
+
+log() { printf '  [%s] %s\n' "$1" "$2"; }
+die() { log error "$1" >&2; exit 1; }
+
+usage() {
+  cat <<USAGE
+usage: sandbox-host <command>
+
+  build          build the image from $VINCEWORKS/sandbox
+  install-unit   install the quadlet unit and reload systemd
+  up             start the sandbox, building and installing the unit if needed
+  rebuild        build, reinstall the unit, and restart the sandbox
+  status         show systemd status for the sandbox
+USAGE
+  exit 1
+}
+
+cmd_build() {
+  git -C "$VINCEWORKS" pull --ff-only || log warn "could not pull vinceworks, building from current checkout"
+  podman build -t "$IMAGE" --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" "$VINCEWORKS/sandbox"
+  log ok "$IMAGE"
+}
+
+cmd_install_unit() {
+  mkdir -p "$UNIT_DIR"
+  cp "$VINCEWORKS/sandbox/sandbox.container" "$UNIT_DIR/$UNIT.container"
+  systemctl --user daemon-reload
+  log ok "installed $UNIT.container"
+}
+
+cmd_up() {
+  mkdir -p "$SANDBOX_HOME"
+  if [[ ! -f "$UNIT_DIR/$UNIT.container" ]] || ! cmp -s "$VINCEWORKS/sandbox/sandbox.container" "$UNIT_DIR/$UNIT.container"; then
+    cmd_install_unit
+  fi
+  podman image exists "$IMAGE" || cmd_build
+  systemctl --user start "$UNIT"
+  systemctl --user is-active "$UNIT"
+}
+
+cmd_rebuild() {
+  cmd_build
+  cmd_install_unit
+  systemctl --user restart "$UNIT"
+}
+
+cmd_status() {
+  systemctl --user status "$UNIT" --no-pager
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  build) cmd_build ;;
+  install-unit) cmd_install_unit ;;
+  up) cmd_up ;;
+  rebuild) cmd_rebuild ;;
+  status) cmd_status ;;
+  *) usage ;;
+esac

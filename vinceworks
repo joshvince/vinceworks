@@ -9,6 +9,7 @@ usage() {
 usage: vinceworks <command> [args]
 
   vinceworks sandbox [args]             the agents' sandbox on the home server (see sandbox/README.md)
+  vinceworks ssh [args]                 per-project agent SSH access to production boxes (see agent-ssh-access-plan.md)
   vinceworks tmux                       attach to tmux inside the sandbox
   vinceworks update [args]              pick up dotfile and package changes on an existing machine
   vinceworks ai [args]                  install AI tools and sync agents/skills
@@ -23,6 +24,7 @@ shift
 
 case "$command" in
   sandbox) exec "$VINCEWORKS_DIR/sandbox/sandbox" "$@" ;;
+  ssh) exec "$VINCEWORKS_DIR/ssh/ssh" "$@" ;;
   # Ghostty sends TERM=xterm-ghostty, which the container has no terminfo for, so tmux refuses to start.
   tmux) exec ssh -t "${SANDBOX_SSH_HOST:-vinceworks-sandbox}" 'export TERM=xterm-256color; cd ~/projects && tmux new -A -s main' ;;
   update) exec "$VINCEWORKS_DIR/update.sh" "$@" ;;

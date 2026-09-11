@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+# Mac-side CLI for per-project agent SSH access to production boxes. keygen
+# generates a scoped ed25519 keypair in the sandbox and prints what's needed
+# to wire it up by hand; see agent-ssh-access-plan.md for the full design.
+set -euo pipefail
+
+SSH_HOST=${SANDBOX_SSH_HOST:-vinceworks-sandbox}
+BOT_USER=vinceworks-bot
+
+usage() {
+  cat <<USAGE
+usage: vinceworks ssh <command> [args]
+
+  vinceworks ssh keygen <project> <host> [--resume]   generate a scoped keypair in the sandbox for <project> on <host>, then walk through the manual production setup steps
+                                                        --resume skips generation and replays the walkthrough for a key that already exists
+USAGE
+  exit 1
+}
+
+# Walks through 11 paced steps: reveal the public key, authorized_keys line
+# and provisioning script, then the manual production setup steps. Shared by
+# both the fresh-generation and --resume paths in cmd_keygen, which must set
+# project, host, tag, pubkey, key_type and key_data before calling this.
+print_keygen_walkthrough() {
+  local script_name="provision-$project-$host.sh"
+  local authorized_keys_line="restrict,command=\"rrsync -ro /\" $key_type $key_data $tag"
+  # Double quotes escaped for step 3 below, where the line is embedded inside
+  # an outer double-quoted ssh command - unescaped quotes there would close
+  # that string early and break the pasted command.
+  local authorized_keys_line_escaped=${authorized_keys_line//\"/\\\"}
+
+  echo "1. Here's the public key for $tag:"
+  echo "$pubkey"
+  read -rp "Press Enter to continue... "
+
+  echo
+  echo "2. Here's the authorized_keys line for $BOT_USER on $host (tagged for revoke)."
+  echo "   This is the line sshd checks when this key tries to log in - restrict,command=\"rrsync -ro /\" forces every connection using this key into a read-only rsync no matter what command is actually sent; the tag on the end is just a label for later revoke, not functional to SSH:"
+  echo "$authorized_keys_line"
+  read -rp "Press Enter to continue... "
+
+  echo
+  echo "3. Here's the provisioning script - review it, then run it manually as root on $host:"
+  cat <<PROVISION
+#!/usr/bin/env bash
+# Provisioning for $tag. Not run automatically by vinceworks - copy, review, run as root.
+set -euo pipefail
+
+BOT_USER=$BOT_USER
+
+if ! id "\$BOT_USER" &>/dev/null; then
+  # Needs a real shell, not nologin/false: sshd runs the authorized_keys
+  # forced command via the account's login shell, so nologin would block it.
+  useradd --system --create-home --shell /bin/bash "\$BOT_USER"
+fi
+
+install -d -m 700 -o "\$BOT_USER" -g "\$BOT_USER" "/home/\$BOT_USER/.ssh"
+touch "/home/\$BOT_USER/.ssh/authorized_keys"
+chmod 600 "/home/\$BOT_USER/.ssh/authorized_keys"
+chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
+
+# The authorized_keys line for '$tag' is appended in step 8 of the
+# vinceworks ssh keygen walkthrough, run from your Mac after this script.
+
+# --- remaining manual steps ---
+# 1. Confirm rrsync is on \$BOT_USER's PATH - it ships with rsync but isn't
+#    always symlinked into /usr/bin (check /usr/share/doc/rsync*/scripts/rrsync).
+# 2. Add an sshd Match block for \$BOT_USER (e.g. a drop-in under
+#    /etc/ssh/sshd_config.d/) setting 'LogLevel VERBOSE' so the key
+#    fingerprint is logged on every connection.
+# 3. Confirm \$BOT_USER cannot read secrets anywhere on this box (.env
+#    files, credential files, other projects' config, etc, wherever they
+#    live on $host). This key gets whole-filesystem read access as
+#    readable by \$BOT_USER, so \$BOT_USER's own file permissions are the
+#    only thing standing between it and any secret it can see - check it
+#    by hand, this script does not guess your ACLs.
+PROVISION
+  read -rp "Press Enter to continue... "
+
+  echo
+  echo "== next steps (run these yourself - nothing below is automated) =="
+  echo
+  echo "4. Save the script above to a local file (e.g. $script_name)."
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "5. Copy that file to the box for $tag."
+  echo "   Replace <ssh-target> below with wherever that box actually is for you (hostname, IP, or your own ssh config alias) - \"$host\" is just this key's label, not assumed to be reachable:"
+  echo "     scp $script_name <ssh-target>:~/$script_name"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "6. SSH to <ssh-target>:"
+  echo "     ssh <ssh-target>"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "7. Run the script as root, in that same session:"
+  echo "     sudo bash ~/$script_name"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "8. Append the authorized_keys line to $BOT_USER's file on $host. Run this from your Mac (same <ssh-target> as above) - don't paste the raw line anywhere yourself, this command does the appending for you:"
+  echo "     ssh <ssh-target> \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "9. On $host, confirm rrsync is on $BOT_USER's PATH (ships with rsync, not always symlinked into /usr/bin)."
+  read -rp "Press Enter once you've confirmed this... "
+
+  echo
+  echo "10. On $host, confirm sshd has a Match block for $BOT_USER with LogLevel VERBOSE."
+  read -rp "Press Enter once you've confirmed this... "
+
+  echo
+  echo "11. On $host, confirm $BOT_USER cannot read secrets anywhere it has access to (.env files, credential files, other projects' config, etc, wherever they live on this box)."
+  read -rp "Press Enter once you've confirmed this... "
+
+  echo
+  echo "$tag should now be live on $host."
+}
+
+cmd_keygen() {
+  local project=${1:?project required} host=${2:?host required}
+  shift 2
+  local resume=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --resume) resume=true; shift ;;
+      *) echo "  [error] unknown argument: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local key_name="$project-$host"
+  local tag="vinceworks:$project:$host"
+  local pubkey key_type key_data
+
+  if $resume; then
+    if ! ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
+      echo "  [error] ~/.ssh/vinceworks-bot/$key_name doesn't exist in the sandbox; run keygen without --resume first" >&2
+      exit 1
+    fi
+    pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
+  else
+    # Refuse rather than touch an existing key, so a re-run never clobbers one in use.
+    if ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
+      echo "  [error] ~/.ssh/vinceworks-bot/$key_name already exists in the sandbox; refusing to overwrite" >&2
+      exit 1
+    fi
+
+    ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks-bot && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks-bot/$(printf %q "$key_name") -q"
+    pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
+  fi
+
+  read -r key_type key_data _ <<<"$pubkey"
+
+  print_keygen_walkthrough
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  keygen) cmd_keygen "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac

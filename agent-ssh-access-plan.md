@@ -12,12 +12,12 @@ An agent working on a project should be able to pull files (config, logs, data) 
 - **Key granularity**: one ed25519 keypair per project+host pair. No shared bot key across projects. This gives per-project revocation without touching other projects' access.
 - **Bot user provisioning**: a second, low-privilege OS user (e.g. `vinceworks-bot`) is created on the box manually, outside of vinceworks tooling. The CLI prints a copy-paste provisioning script (create user, lock down sshd `Match` block) but never runs it remotely itself — it doesn't need root on the box.
 - **Path scope**: keys get whole-filesystem read access (as readable by the bot user), not locked to a single project directory. Note: on a box that hosts multiple projects, this means a leaked key for project A can also read project B's files on that box. Accepted tradeoff — isolation is only as strong as "one box = one project" in that case.
-- **Key storage**: private keys live in 1Password, one item per project+host. Local SSH auth still goes through the built-in ssh-agent (not the 1Password SSH agent integration), consistent with existing setup for other private-project SSH access. Keys are pulled into the local agent transiently for a task and never persisted to disk long-term.
+- **Key storage**: private keys are persisted on disk, one file per project+host, `chmod 600`, only where the agent actually runs (the sandbox, not my laptop). No 1Password involvement in the live/runtime path, and no standing token anywhere — a 1Password service-account token would unlock the whole vault, which is a far bigger blast radius than one key that can only do a read-only rsync pull on one box. This matters because agents need to work unattended; a design that requires me to unlock something first defeats that. 1Password is optional and out-of-band: I can stash a manual backup copy of a key there myself for disaster recovery, but nothing in the system reads from or writes to it automatically.
 - **Default-deny**: no project gets a key unless explicitly opted in.
 
 ## CLI commands
 
-- `vinceworks ssh keygen <project> <host>` — generates the ed25519 keypair, pushes the private half to a 1Password item, and prints:
+- `vinceworks ssh keygen <project> <host>` — generates the ed25519 keypair, writes the private half to disk in the sandbox (`chmod 600`), and prints:
   - the public key plus the forced-command `authorized_keys` line
   - a provisioning script for the bot user + sshd hardening, for me to run manually as root on the box
 - `vinceworks ssh install <project> <host>` — SSHes in with my own admin key and appends the forced-command line to the bot user's `authorized_keys`.
@@ -31,8 +31,8 @@ An agent working on a project should be able to pull files (config, logs, data) 
 
 ## Rollout order
 
-1. `vinceworks ssh keygen` + 1Password storage
+1. `vinceworks ssh keygen` + on-disk key storage in the sandbox
 2. Provisioning script output + manual bot-user setup on one test box
 3. `vinceworks ssh install`
 4. `vinceworks ssh revoke`
-5. Wire runtime key retrieval into the agent session flow (transient ssh-agent load per task)
+5. Wire key loading into the agent session flow (load into ssh-agent at session start, no manual unlock step)

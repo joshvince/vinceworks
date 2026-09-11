@@ -11,8 +11,8 @@ usage() {
   cat <<USAGE
 usage: vinceworks ssh <command> [args]
 
-  vinceworks ssh keygen <project> <host> [--path <path>] [--resume]   generate a scoped keypair in the sandbox for <project> on <host>, then walk through the manual production setup steps
-                                                                        --resume skips generation and replays the walkthrough for a key that already exists
+  vinceworks ssh keygen <project> <host> [--resume]   generate a scoped keypair in the sandbox for <project> on <host>, then walk through the manual production setup steps
+                                                        --resume skips generation and replays the walkthrough for a key that already exists
 USAGE
   exit 1
 }
@@ -20,15 +20,20 @@ USAGE
 # Prints the public key / authorized_keys line / provisioning script, then
 # walks through the 4 paced manual production setup steps. Shared by both the
 # fresh-generation and --resume paths in cmd_keygen, which must set project,
-# host, remote_path, tag, pubkey, key_type and key_data before calling this.
+# host, tag, pubkey, key_type and key_data before calling this.
 print_keygen_walkthrough() {
   local script_name="provision-$project-$host.sh"
+  local authorized_keys_line="restrict,command=\"rrsync -ro /\" $key_type $key_data $tag"
+  # Double quotes escaped for step 3 below, where the line is embedded inside
+  # an outer double-quoted ssh command - unescaped quotes there would close
+  # that string early and break the pasted command.
+  local authorized_keys_line_escaped=${authorized_keys_line//\"/\\\"}
 
   echo "== public key =="
   echo "$pubkey"
   echo
   echo "== authorized_keys line ($BOT_USER on $host, tagged for revoke) =="
-  echo "restrict,command=\"rrsync -ro $remote_path\" $key_type $key_data $tag"
+  echo "$authorized_keys_line"
   echo
   echo "== provisioning script (review, then run manually as root on $host) =="
   cat <<PROVISION
@@ -57,11 +62,12 @@ chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
 # 2. Add an sshd Match block for \$BOT_USER (e.g. a drop-in under
 #    /etc/ssh/sshd_config.d/) setting 'LogLevel VERBOSE' so the key
 #    fingerprint is logged on every connection.
-# 3. Confirm \$BOT_USER cannot read secrets under $remote_path (.env,
-#    config/master.key, credentials/*.key, etc). rrsync's -ro scope is
-#    directory-wide, so secrets living inside $remote_path need their own
-#    file permissions excluding \$BOT_USER. This is layout-specific to
-#    $host - check it by hand, this script does not guess your ACLs.
+# 3. Confirm \$BOT_USER cannot read secrets anywhere on this box (.env
+#    files, credential files, other projects' config, etc, wherever they
+#    live on $host). This key gets whole-filesystem read access as
+#    readable by \$BOT_USER, so \$BOT_USER's own file permissions are the
+#    only thing standing between it and any secret it can see - check it
+#    by hand, this script does not guess your ACLs.
 PROVISION
 
   echo
@@ -79,15 +85,15 @@ PROVISION
   read -rp "Press Enter once that's done... "
 
   echo
-  echo "3. Append this line to /home/$BOT_USER/.ssh/authorized_keys on $host:"
-  echo "     restrict,command=\"rrsync -ro $remote_path\" $key_type $key_data $tag"
+  echo "3. Append the authorized_keys line to $BOT_USER's file on $host. Run this from your Mac (same <ssh-target> as above) - don't paste the raw line anywhere yourself, this command does the appending for you:"
+  echo "     ssh <ssh-target> \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
   read -rp "Press Enter once that's done... "
 
   echo
   echo "4. Final manual checks on $host:"
   echo "     - rrsync is on $BOT_USER's PATH (ships with rsync, not always symlinked into /usr/bin)"
   echo "     - sshd has a Match block for $BOT_USER with LogLevel VERBOSE"
-  echo "     - $BOT_USER cannot read secrets under $remote_path (.env, config/master.key, credentials/*.key, etc)"
+  echo "     - $BOT_USER cannot read secrets anywhere on $host it has access to (.env files, credential files, other projects' config, etc, wherever they live on this box)"
   read -rp "Press Enter once you've checked all three... "
 
   echo
@@ -97,10 +103,9 @@ PROVISION
 cmd_keygen() {
   local project=${1:?project required} host=${2:?host required}
   shift 2
-  local remote_path="/srv/$project" resume=false
+  local resume=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --path) remote_path=${2:?--path requires a value}; shift 2 ;;
       --resume) resume=true; shift ;;
       *) echo "  [error] unknown argument: $1" >&2; exit 1 ;;
     esac

@@ -67,13 +67,14 @@ PROVISION
   echo
   echo "== next steps (run these yourself - nothing below is automated) =="
   echo
-  echo "1. Save the provisioning script above to a file (e.g. $script_name), then copy it to $host:"
-  echo "     scp $script_name $host:~/$script_name"
+  echo "1. Save the provisioning script above to a file (e.g. $script_name), then copy it to the box for $tag."
+  echo "   Replace <ssh-target> below with wherever that box actually is for you (hostname, IP, or your own ssh config alias) - \"$host\" is just this key's label, not assumed to be reachable:"
+  echo "     scp $script_name <ssh-target>:~/$script_name"
   read -rp "Press Enter once that's done... "
 
   echo
-  echo "2. SSH to $host and run it as root:"
-  echo "     ssh $host"
+  echo "2. SSH to <ssh-target> and run it as root:"
+  echo "     ssh <ssh-target>"
   echo "     sudo bash ~/$script_name"
   read -rp "Press Enter once that's done... "
 

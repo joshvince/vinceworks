@@ -11,36 +11,18 @@ usage() {
   cat <<USAGE
 usage: vinceworks ssh <command> [args]
 
-  vinceworks ssh keygen <project> <host> [--path <path>]   generate a scoped keypair in the sandbox for <project> on <host>
+  vinceworks ssh keygen <project> <host> [--path <path>] [--resume]   generate a scoped keypair in the sandbox for <project> on <host>, then walk through the manual production setup steps
+                                                                        --resume skips generation and replays the walkthrough for a key that already exists
 USAGE
   exit 1
 }
 
-cmd_keygen() {
-  local project=${1:?project required} host=${2:?host required}
-  shift 2
-  local remote_path="/srv/$project"
-  while [[ $# -gt 0 ]]; do
-    case "$1" in
-      --path) remote_path=${2:?--path requires a value}; shift 2 ;;
-      *) echo "  [error] unknown argument: $1" >&2; exit 1 ;;
-    esac
-  done
-
-  local key_name="$project-$host"
-  local tag="vinceworks:$project:$host"
-
-  # Refuse rather than touch an existing key, so a re-run never clobbers one in use.
-  if ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
-    echo "  [error] ~/.ssh/vinceworks-bot/$key_name already exists in the sandbox; refusing to overwrite" >&2
-    exit 1
-  fi
-
-  ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks-bot && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks-bot/$(printf %q "$key_name") -q"
-
-  local pubkey key_type key_data
-  pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
-  read -r key_type key_data _ <<<"$pubkey"
+# Prints the public key / authorized_keys line / provisioning script, then
+# walks through the 4 paced manual production setup steps. Shared by both the
+# fresh-generation and --resume paths in cmd_keygen, which must set project,
+# host, remote_path, tag, pubkey, key_type and key_data before calling this.
+print_keygen_walkthrough() {
+  local script_name="provision-$project-$host.sh"
 
   echo "== public key =="
   echo "$pubkey"
@@ -81,6 +63,72 @@ chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
 #    file permissions excluding \$BOT_USER. This is layout-specific to
 #    $host - check it by hand, this script does not guess your ACLs.
 PROVISION
+
+  echo
+  echo "== next steps (run these yourself - nothing below is automated) =="
+  echo
+  echo "1. Save the provisioning script above to a file (e.g. $script_name), then copy it to $host:"
+  echo "     scp $script_name $host:~/$script_name"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "2. SSH to $host and run it as root:"
+  echo "     ssh $host"
+  echo "     sudo bash ~/$script_name"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "3. Append this line to /home/$BOT_USER/.ssh/authorized_keys on $host:"
+  echo "     restrict,command=\"rrsync -ro $remote_path\" $key_type $key_data $tag"
+  read -rp "Press Enter once that's done... "
+
+  echo
+  echo "4. Final manual checks on $host:"
+  echo "     - rrsync is on $BOT_USER's PATH (ships with rsync, not always symlinked into /usr/bin)"
+  echo "     - sshd has a Match block for $BOT_USER with LogLevel VERBOSE"
+  echo "     - $BOT_USER cannot read secrets under $remote_path (.env, config/master.key, credentials/*.key, etc)"
+  read -rp "Press Enter once you've checked all three... "
+
+  echo
+  echo "$tag should now be live on $host."
+}
+
+cmd_keygen() {
+  local project=${1:?project required} host=${2:?host required}
+  shift 2
+  local remote_path="/srv/$project" resume=false
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path) remote_path=${2:?--path requires a value}; shift 2 ;;
+      --resume) resume=true; shift ;;
+      *) echo "  [error] unknown argument: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local key_name="$project-$host"
+  local tag="vinceworks:$project:$host"
+  local pubkey key_type key_data
+
+  if $resume; then
+    if ! ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
+      echo "  [error] ~/.ssh/vinceworks-bot/$key_name doesn't exist in the sandbox; run keygen without --resume first" >&2
+      exit 1
+    fi
+    pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
+  else
+    # Refuse rather than touch an existing key, so a re-run never clobbers one in use.
+    if ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
+      echo "  [error] ~/.ssh/vinceworks-bot/$key_name already exists in the sandbox; refusing to overwrite" >&2
+      exit 1
+    fi
+
+    ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks-bot && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks-bot/$(printf %q "$key_name") -q"
+    pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
+  fi
+
+  read -r key_type key_data _ <<<"$pubkey"
+
+  print_keygen_walkthrough
 }
 
 command=${1:-}

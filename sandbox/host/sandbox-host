@@ -55,7 +55,15 @@ cmd_rebuild() {
 }
 
 cmd_status() {
-  systemctl --user status "$UNIT" --no-pager
+  prop() { systemctl --user show "$UNIT" --no-page -p "$1" --value; }
+
+  echo "state: $(prop ActiveState) $(prop SubState)"
+  echo "mem:   $(numfmt --to=iec-i --suffix=B "$(prop MemoryCurrent)" 2>/dev/null || prop MemoryCurrent)"
+  echo "cpu:   $(( $(prop CPUUsageNSec) / 1000000000 ))s"
+  echo
+  local warnings
+  warnings=$(journalctl --user -u "$UNIT" -p warning -n 5 --no-pager)
+  [[ -n "$warnings" ]] && echo "$warnings" || echo "no warnings"
 }
 
 command=${1:-}

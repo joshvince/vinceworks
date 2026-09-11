@@ -54,7 +54,9 @@ touch "/home/\$BOT_USER/.ssh/authorized_keys"
 chmod 600 "/home/\$BOT_USER/.ssh/authorized_keys"
 chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
 
-# Append the authorized_keys line printed above (tagged '$tag') to that file yourself.
+# This script does NOT append the authorized_keys line for '$tag' - that
+# happens separately, in step 5 of the vinceworks ssh keygen walkthrough
+# (run from your Mac, after this script has finished). Don't add it here.
 
 # --- manual steps this script does not do for you ---
 # 1. Confirm rrsync is on \$BOT_USER's PATH - it ships with rsync but isn't

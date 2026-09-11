@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# Mac-side CLI for per-project agent SSH access to production boxes. keygen
+# generates a scoped ed25519 keypair in the sandbox and prints what's needed
+# to wire it up by hand; see agent-ssh-access-plan.md for the full design.
+set -euo pipefail
+
+SSH_HOST=${SANDBOX_SSH_HOST:-vinceworks-sandbox}
+BOT_USER=vinceworks-bot
+
+usage() {
+  cat <<USAGE
+usage: vinceworks ssh <command> [args]
+
+  vinceworks ssh keygen <project> <host> [--path <path>]   generate a scoped keypair in the sandbox for <project> on <host>
+USAGE
+  exit 1
+}
+
+cmd_keygen() {
+  local project=${1:?project required} host=${2:?host required}
+  shift 2
+  local remote_path="/srv/$project"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --path) remote_path=${2:?--path requires a value}; shift 2 ;;
+      *) echo "  [error] unknown argument: $1" >&2; exit 1 ;;
+    esac
+  done
+
+  local key_name="$project-$host"
+  local tag="vinceworks:$project:$host"
+
+  # Refuse rather than touch an existing key, so a re-run never clobbers one in use.
+  if ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks-bot/$(printf %q "$key_name") ]"; then
+    echo "  [error] ~/.ssh/vinceworks-bot/$key_name already exists in the sandbox; refusing to overwrite" >&2
+    exit 1
+  fi
+
+  ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks-bot && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks-bot/$(printf %q "$key_name") -q"
+
+  local pubkey key_type key_data
+  pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks-bot/$(printf %q "$key_name").pub")
+  read -r key_type key_data _ <<<"$pubkey"
+
+  echo "== public key =="
+  echo "$pubkey"
+  echo
+  echo "== authorized_keys line ($BOT_USER on $host, tagged for revoke) =="
+  echo "restrict,command=\"rrsync -ro $remote_path\" $key_type $key_data $tag"
+  echo
+  echo "== provisioning script (review, then run manually as root on $host) =="
+  cat <<PROVISION
+#!/usr/bin/env bash
+# Provisioning for $tag. Not run automatically by vinceworks - copy, review, run as root.
+set -euo pipefail
+
+BOT_USER=$BOT_USER
+
+if ! id "\$BOT_USER" &>/dev/null; then
+  # Needs a real shell, not nologin/false: sshd runs the authorized_keys
+  # forced command via the account's login shell, so nologin would block it.
+  useradd --system --create-home --shell /bin/bash "\$BOT_USER"
+fi
+
+install -d -m 700 -o "\$BOT_USER" -g "\$BOT_USER" "/home/\$BOT_USER/.ssh"
+touch "/home/\$BOT_USER/.ssh/authorized_keys"
+chmod 600 "/home/\$BOT_USER/.ssh/authorized_keys"
+chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
+
+# Append the authorized_keys line printed above (tagged '$tag') to that file yourself.
+
+# --- manual steps this script does not do for you ---
+# 1. Confirm rrsync is on \$BOT_USER's PATH - it ships with rsync but isn't
+#    always symlinked into /usr/bin (check /usr/share/doc/rsync*/scripts/rrsync).
+# 2. Add an sshd Match block for \$BOT_USER (e.g. a drop-in under
+#    /etc/ssh/sshd_config.d/) setting 'LogLevel VERBOSE' so the key
+#    fingerprint is logged on every connection.
+# 3. Confirm \$BOT_USER cannot read secrets under $remote_path (.env,
+#    config/master.key, credentials/*.key, etc). rrsync's -ro scope is
+#    directory-wide, so secrets living inside $remote_path need their own
+#    file permissions excluding \$BOT_USER. This is layout-specific to
+#    $host - check it by hand, this script does not guess your ACLs.
+PROVISION
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  keygen) cmd_keygen "$@" ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac

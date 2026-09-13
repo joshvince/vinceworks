@@ -325,21 +325,32 @@ MARKER
   elif [[ "$kamal_key" != '~/.ssh/'* ]]; then
     echo "  [skip] kamal ssh.keys entry $kamal_key is not under ~/.ssh/, leaving it alone"
   else
-    ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_key") $(printf %q "$key_name")" <<'REMOTE'
+    # kamal_key keeps its leading ~ only for display; the path sent over the
+    # wire is HOME-relative so the sandbox's zsh login shell has no tilde to
+    # expand before sh -s ever sees the argument.
+    local kamal_relative kamal_status
+    kamal_relative=${kamal_key#\~/}
+    kamal_status=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_relative") $(printf %q "$key_name")" <<'REMOTE'
 set -eu
-kamal_path=$1
+relative_path=$1
 alias_key_name=$2
-expanded="$HOME/${kamal_path#\~/}"
+expanded="$HOME/$relative_path"
 if [ -L "$expanded" ]; then
-  echo "  [skip] $kamal_path is already a symlink in the sandbox"
+  echo "symlink"
 elif [ -e "$expanded" ]; then
-  echo "  [skip] a real file already sits at $kamal_path in the sandbox; leaving it alone"
+  echo "file"
 else
   mkdir -p "$(dirname "$expanded")"
   ln -s "$HOME/.ssh/vinceworks/$alias_key_name" "$expanded"
-  echo "  [symlinked] $kamal_path -> ~/.ssh/vinceworks/$alias_key_name"
+  echo "linked"
 fi
 REMOTE
+)
+    case "$kamal_status" in
+      symlink) echo "  [skip] $kamal_key is already a symlink in the sandbox" ;;
+      file) echo "  [skip] a real file already sits at $kamal_key in the sandbox; leaving it alone" ;;
+      linked) echo "  [symlinked] $kamal_key -> ~/.ssh/vinceworks/$key_name" ;;
+    esac
   fi
 
   step "10. [SANDBOX] verifying end-to-end access"
@@ -471,17 +482,21 @@ REMOTE
   local kamal_key
   kamal_key=$(first_kamal_key "$deploy_yml")
   if [[ -n "$kamal_key" && "$kamal_key" == '~/.ssh/'* ]]; then
-    ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_key") $(printf %q "$key_name")" <<'REMOTE'
+    local kamal_relative kamal_status
+    kamal_relative=${kamal_key#\~/}
+    kamal_status=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_relative") $(printf %q "$key_name")" <<'REMOTE'
 set -eu
-kamal_path=$1
+relative_path=$1
 key_name=$2
-expanded="$HOME/${kamal_path#\~/}"
+expanded="$HOME/$relative_path"
 target_key="$HOME/.ssh/vinceworks/$key_name"
 if [ -L "$expanded" ] && [ "$(readlink "$expanded")" = "$target_key" ]; then
   rm -f "$expanded"
-  echo "  [removed] kamal symlink $kamal_path"
+  echo "removed"
 fi
 REMOTE
+)
+    [[ "$kamal_status" == "removed" ]] && echo "  [removed] kamal symlink $kamal_key"
   fi
 
   echo "  [removed] key and marker for $key_name in the sandbox"

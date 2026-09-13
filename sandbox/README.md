@@ -24,6 +24,24 @@ I put together a simple command line interface to manage this, so I can run thin
 
 There are also fairly simple scripts to handle things like new worktrees being instantiated, and I am using `tmux` to be able to attach and detach into things without needing Paseo as the bridge.
 
+### Agent SSH access to production
+
+Agents in the sandbox start out unable to reach any of my production servers, so ordinary tasks like `kamal app logs` fail. `vinceworks sandbox ssh-grant <project> <target>` fixes that for one project and one server at a time, where `<target>` is any ssh target that already works from the Mac: an alias from `~/.ssh/config`, or a bare hostname/IP.
+
+**My own Mac keys are never read, copied, moved or touched.** Instead, `ssh-grant` generates a brand new ed25519 keypair inside the sandbox, scoped to that one project and target, and only the public half ever leaves the sandbox: it gets appended to the target's `~/.ssh/authorized_keys`, tagged with a comment like `vinceworks:myapp:myapp-prod` so it can be found again later. The sandbox also gets a matching `Host <target>` block in its own `~/.ssh/config`, so an agent can `ssh <target>` using the exact same alias I'd type on the Mac. If the project's `config/deploy.yml` points `ssh.keys` at a path under `~/.ssh/`, that path is symlinked to the new key in the sandbox too, so `kamal` commands work there unmodified.
+
+Two ways to grant access:
+
+- `vinceworks sandbox push <url|name> [paths...] --ssh <target>` (grant access as part of pushing a project to the sandbox for the first time)
+- `vinceworks sandbox ssh-grant <project> <target>` (grant access to a project that's already in the sandbox, or add a second target to one that already has access somewhere)
+
+Both show a confirmation block (target, resolved hostname/port/user, key fingerprint) before appending anything to the target machine, and default to "no". `ssh-grant` also turns on `LogLevel VERBOSE` in the target's sshd config (skipped with a warning if the box doesn't use `sshd_config.d`), so `auth.log` can tell the agent's key apart from mine.
+
+`vinceworks sandbox ssh-revoke <project> [target]` undoes a grant: it strips the tagged line from the target's `authorized_keys`, then deletes the key, its marker, its `Host` block, and its kamal symlink (only if that symlink still points at the key being removed) from the sandbox. Leave off `[target]` to revoke every grant a project has, after one confirmation listing them all. The sshd audit logging config is left in place on revoke, since other grants on the same box may still depend on it.
+
+`vinceworks sandbox ssh-list` shows every project's current grants: target, hostname, remote user and key fingerprint.
+
+**Carwow projects never get a grant, full stop.** `ssh-grant` and `push --ssh` hard-refuse, case-insensitively, if the project name or its git origin URL contains "carwow": there's no flag or override to bypass this.
 
 ## Paseo
 

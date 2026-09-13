@@ -1,27 +1,50 @@
 #!/usr/bin/env bash
 # Mac-side CLI for the sandbox container. up/rebuild/status are one SSH call
 # to sandbox/host/sandbox-host on the box. push clones a repo into the
-# sandbox if needed and copies its secret files in.
+# sandbox if needed and copies its secret files in. ssh-grant/ssh-revoke/
+# ssh-list manage per-project production SSH access for agents running in
+# the sandbox.
 set -euo pipefail
 
 HOST=${SANDBOX_HOST:-vince-archive}
 SSH_HOST=${SANDBOX_SSH_HOST:-vinceworks-sandbox}
 LOCAL_PROJECTS=${SANDBOX_LOCAL:-$HOME/projects}
 
+bold=$'\033[1m'
+italic=$'\033[3m'
+cyan=$'\033[36m'
+green=$'\033[32m'
+reset=$'\033[0m'
+rule="────────────────────────────────────────"
+
 usage() {
   cat <<USAGE
 usage: vinceworks sandbox <command> [args]
 
-  vinceworks sandbox up                          start the sandbox, building it first if needed
-  vinceworks sandbox rebuild                      rebuild the image and restart the sandbox
-  vinceworks sandbox status                       show systemd status for the sandbox
-  vinceworks sandbox push <url|name> [paths...]   clone a repo into the sandbox if needed and copy its secret files in
-  vinceworks sandbox ps                     list worktrees, their ports and what is listening
+  vinceworks sandbox up                                   start the sandbox, building it first if needed
+  vinceworks sandbox rebuild                               rebuild the image and restart the sandbox
+  vinceworks sandbox status                                show systemd status for the sandbox
+  vinceworks sandbox push <url|name> [paths...] [--ssh <target>]
+                                                            clone a repo into the sandbox if needed, copy its secret files in, and optionally grant it ssh access to <target>
+  vinceworks sandbox ps                                    list worktrees, their ports and what is listening
+  vinceworks sandbox ssh-grant <project> <target>          generate a scoped ssh key in the sandbox and grant <project> access to <target>
+  vinceworks sandbox ssh-revoke <project> [target]         revoke <project>'s ssh access, to one <target> or every target it has
+  vinceworks sandbox ssh-list                              list every project's current ssh grants
 USAGE
   exit 1
 }
 
 remote() { ssh -t "$HOST" "\$HOME/vinceworks/sandbox/host/sandbox-host $1"; }
+
+step() { echo; echo "$rule"; echo "${bold}$1${reset}"; echo; }
+note() { echo "${italic}$1${reset}"; }
+
+confirm() {
+  local reply
+  echo
+  read -rp "${cyan}$1 [y/N]: ${reset}" reply
+  [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
 
 copy_file() {
   local dest="projects/$1/$2"
@@ -30,7 +53,504 @@ copy_file() {
   echo "  [copied] $2"
 }
 
+# Carwow is a company project; nothing agent-facing in the sandbox gets
+# ssh access to carwow production, no matter how the request is phrased.
+carwow_guard() {
+  local project=$1 origin_url=$2 project_lc url_lc
+  project_lc=$(printf '%s' "$project" | tr '[:upper:]' '[:lower:]')
+  url_lc=$(printf '%s' "$origin_url" | tr '[:upper:]' '[:lower:]')
+  if [[ "$project_lc" == *carwow* || "$url_lc" == *carwow* ]]; then
+    echo "  [error] refusing: carwow projects never get production ssh access from the sandbox, no exceptions" >&2
+    exit 1
+  fi
+}
+
+resolve_origin_url() {
+  local project=$1 url
+  if [[ -d "$LOCAL_PROJECTS/$project" ]]; then
+    url=$(git -C "$LOCAL_PROJECTS/$project" remote get-url origin 2>/dev/null) || url=""
+  else
+    url=$(ssh "$SSH_HOST" "git -C ~/projects/$(printf %q "$project") remote get-url origin" 2>/dev/null) || url=""
+  fi
+  printf '%s' "$url"
+}
+
+# kamal's ssh.keys shows up as either an inline array (`keys: ["~/.ssh/foo"]`)
+# or a block list (`keys:` then `- ~/.ssh/foo`); both are handled here with
+# plain awk rather than adding a yq dependency for one field.
+first_kamal_key() {
+  local deploy_yml=$1 raw
+  [[ -f "$deploy_yml" ]] || return 0
+
+  raw=$(awk '
+    /^ssh:[[:space:]]*$/ { in_ssh = 1; next }
+    in_ssh && /^[^[:space:]]/ { in_ssh = 0; in_keys = 0 }
+    in_ssh && /^[[:space:]]*keys:[[:space:]]*\[/ {
+      line = $0
+      sub(/^[[:space:]]*keys:[[:space:]]*\[/, "", line)
+      sub(/\].*$/, "", line)
+      n = split(line, parts, ",")
+      if (n > 0) { print parts[1]; exit }
+    }
+    in_ssh && /^[[:space:]]*keys:[[:space:]]*$/ { in_keys = 1; next }
+    in_keys && /^[[:space:]]*-/ {
+      item = $0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", item)
+      print item
+      exit
+    }
+    in_keys && /^[[:space:]]*[^[:space:]-]/ { in_keys = 0 }
+  ' "$deploy_yml")
+
+  [[ -n "$raw" ]] || return 0
+  sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e "s/^[\"']//" -e "s/[\"']\$//" <<<"$raw"
+}
+
+# Shared by `ssh-grant` and `push --ssh` so the two entry points can't
+# drift apart. This is the only step that touches a production machine,
+# hence the confirmation block below, defaulting to no.
+grant_ssh_access() {
+  local project=$1 target=$2
+  local key_name="$project-$target"
+  local tag="vinceworks:$project:$target"
+
+  ssh "$SSH_HOST" "[ -d ~/projects/$(printf %q "$project") ]" \
+    || { echo "  [error] ~/projects/$project does not exist in the sandbox; push it first" >&2; exit 1; }
+
+  local origin_url
+  origin_url=$(resolve_origin_url "$project")
+  carwow_guard "$project" "$origin_url"
+
+  step "1. [MAC] resolving $target"
+  local target_config target_hostname target_port target_user
+  target_config=$(ssh -G "$target" 2>/dev/null) || { echo "  [error] ssh -G $target failed" >&2; exit 1; }
+  target_hostname=$(awk '$1 == "hostname" { print $2; exit }' <<<"$target_config")
+  target_port=$(awk '$1 == "port" { print $2; exit }' <<<"$target_config")
+  target_user=$(awk '$1 == "user" { print $2; exit }' <<<"$target_config")
+  local target_lc host_lc
+  target_lc=$(printf '%s' "$target" | tr '[:upper:]' '[:lower:]')
+  host_lc=$(printf '%s' "$target_hostname" | tr '[:upper:]' '[:lower:]')
+  if [[ "$target_lc" == "$host_lc" ]]; then
+    note "no Host block for $target in ~/.ssh/config on this Mac; treating it as a literal hostname or IP"
+  fi
+  note "$target resolves to $target_hostname:$target_port as $target_user"
+
+  if ssh "$SSH_HOST" "[ -e ~/.ssh/vinceworks/$(printf %q "$key_name") ]"; then
+    echo "  [error] ~/.ssh/vinceworks/$key_name already exists in the sandbox; refusing to overwrite" >&2
+    exit 1
+  fi
+
+  local host_block existing_found existing_identity existing_user
+  host_block=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$target")" <<'REMOTE'
+set -eu
+alias_name=$1
+config="$HOME/.ssh/config"
+if [ -f "$config" ]; then
+  awk -v name="$alias_name" '
+    tolower($1) == "host" {
+      matched = 0
+      for (i = 2; i <= NF; i++) if ($i == name) matched = 1
+      if (matched) found = 1
+      in_block = matched
+      next
+    }
+    in_block && tolower($1) == "identityfile" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      identityfile = val
+    }
+    in_block && tolower($1) == "user" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      user = val
+    }
+    END {
+      print (found ? 1 : 0)
+      print identityfile
+      print user
+    }
+  ' "$config"
+else
+  printf '0\n\n\n'
+fi
+REMOTE
+)
+  existing_found=$(sed -n '1p' <<<"$host_block")
+  existing_identity=$(sed -n '2p' <<<"$host_block")
+  existing_user=$(sed -n '3p' <<<"$host_block")
+
+  # A pre-existing block for a different key means step 7 would silently skip
+  # and agents would ssh through someone else's identity; catch that now.
+  if [[ "$existing_found" == "1" && "$existing_identity" != "~/.ssh/vinceworks/$key_name" ]]; then
+    echo "  [error] Host $target already exists in the sandbox's ~/.ssh/config, pointing elsewhere:" >&2
+    echo "    IdentityFile: ${existing_identity:-<none>}" >&2
+    echo "    User:         ${existing_user:-<none>}" >&2
+    echo "  Remove or rename that Host block in the sandbox's ~/.ssh/config before granting $project access to $target." >&2
+    exit 1
+  fi
+
+  step "2. [SANDBOX] generating a scoped keypair"
+  ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks/$(printf %q "$key_name") -q"
+  local pubkey fingerprint
+  pubkey=$(ssh "$SSH_HOST" "cat ~/.ssh/vinceworks/$(printf %q "$key_name").pub")
+  fingerprint=$(ssh "$SSH_HOST" "ssh-keygen -lf ~/.ssh/vinceworks/$(printf %q "$key_name").pub")
+  echo "  [keygen] $key_name"
+
+  step "3. [MAC] confirm before touching $target"
+  echo "  target:      $target"
+  echo "  hostname:    $target_hostname"
+  echo "  port:        $target_port"
+  echo "  remote user: $target_user"
+  echo "  tag:         $tag"
+  echo "  fingerprint: $fingerprint"
+  note "This appends the public key above to $target_user@$target_hostname:~/.ssh/authorized_keys. Your own Mac keys are never read or touched."
+  if ! confirm "Append this key to $target"; then
+    echo "  [abort] not appending; the key stays in the sandbox unused at ~/.ssh/vinceworks/$key_name" >&2
+    exit 1
+  fi
+
+  step "4. [PROD] appending the public key on $target"
+  ssh "$target" "sh -s -- $(printf %q "$pubkey") $(printf %q "$tag")" <<'REMOTE'
+set -eu
+pubkey=$1
+tag=$2
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+touch "$HOME/.ssh/authorized_keys"
+chmod 600 "$HOME/.ssh/authorized_keys"
+if grep -qF "$tag" "$HOME/.ssh/authorized_keys" 2>/dev/null; then
+  echo "  [skip] a key tagged $tag is already present"
+else
+  printf '%s\n' "$pubkey" >>"$HOME/.ssh/authorized_keys"
+  echo "  [appended] authorized_keys"
+fi
+REMOTE
+
+  step "5. [PROD] enabling fingerprint logging on $target"
+  ssh "$target" "sh -s -- $(printf %q "$target_user")" <<'REMOTE'
+set -eu
+remote_user=$1
+sudo_cmd=""
+[ "$remote_user" = root ] || sudo_cmd="sudo"
+
+if ! grep -qE '^[[:space:]]*Include[[:space:]]+/etc/ssh/sshd_config\.d/\*\.conf' /etc/ssh/sshd_config; then
+  echo "  [warn] /etc/ssh/sshd_config has no Include for sshd_config.d/*.conf; skipping fingerprint logging"
+  exit 0
+fi
+
+conf=/etc/ssh/sshd_config.d/vinceworks-audit.conf
+if [ -f "$conf" ]; then
+  echo "  [skip] $conf already present"
+  exit 0
+fi
+
+echo "LogLevel VERBOSE" | $sudo_cmd tee "$conf" >/dev/null
+
+if ! $sudo_cmd sshd -t; then
+  $sudo_cmd rm -f "$conf"
+  echo "  [error] sshd -t failed after writing $conf; removed it rather than leave sshd unable to reload" >&2
+  exit 1
+fi
+
+if $sudo_cmd systemctl reload sshd 2>/dev/null || $sudo_cmd systemctl reload ssh 2>/dev/null; then
+  echo "  [enabled] LogLevel VERBOSE via $conf"
+else
+  echo "  [warn] wrote $conf but could not reload sshd automatically; reload it manually"
+fi
+REMOTE
+
+  step "6. [MAC] pinning $target_hostname's host key"
+  local scanned
+  scanned=$(ssh-keyscan -p "$target_port" "$target_hostname" 2>/dev/null)
+  if [[ -z "$scanned" ]]; then
+    echo "  [error] ssh-keyscan returned nothing for $target_hostname:$target_port" >&2
+    exit 1
+  fi
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$scanned")" <<'REMOTE'
+set -eu
+scanned=$1
+mkdir -p -m 700 "$HOME/.ssh"
+touch "$HOME/.ssh/known_hosts"
+printf '%s\n' "$scanned" >>"$HOME/.ssh/known_hosts"
+tmp=$(mktemp)
+sort -u "$HOME/.ssh/known_hosts" -o "$tmp"
+mv "$tmp" "$HOME/.ssh/known_hosts"
+chmod 600 "$HOME/.ssh/known_hosts"
+REMOTE
+  echo "  [pinned] host key for $target_hostname:$target_port"
+
+  step "7. [SANDBOX] wiring up ~/.ssh/config"
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$target") $(printf %q "$target_hostname") $(printf %q "$target_port") $(printf %q "$target_user") $(printf %q "$key_name")" <<'REMOTE'
+set -eu
+alias_name=$1
+alias_hostname=$2
+alias_port=$3
+alias_user=$4
+alias_key_name=$5
+config="$HOME/.ssh/config"
+
+mkdir -p -m 700 "$HOME/.ssh"
+touch "$config"
+chmod 600 "$config"
+
+if awk -v name="$alias_name" '
+     tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == name) found = 1 }
+     END { exit found ? 0 : 1 }
+   ' "$config"; then
+  echo "  [skip] Host $alias_name already in the sandbox's ~/.ssh/config"
+  exit 0
+fi
+
+printf '\nHost %s\n    HostName %s\n    Port %s\n    User %s\n    IdentityFile ~/.ssh/vinceworks/%s\n    IdentitiesOnly yes\n' \
+  "$alias_name" "$alias_hostname" "$alias_port" "$alias_user" "$alias_key_name" >>"$config"
+echo "  [added] Host $alias_name to the sandbox's ~/.ssh/config"
+REMOTE
+
+  step "8. [SANDBOX] recording the grant"
+  ssh "$SSH_HOST" "cat > ~/.ssh/vinceworks/$(printf %q "$key_name").target" <<MARKER
+project=$project
+target=$target
+hostname=$target_hostname
+port=$target_port
+user=$target_user
+MARKER
+  echo "  [recorded] ~/.ssh/vinceworks/$key_name.target"
+
+  step "9. [SANDBOX] wiring up the kamal key, if any"
+  local deploy_yml="$LOCAL_PROJECTS/$project/config/deploy.yml"
+  local kamal_key
+  kamal_key=$(first_kamal_key "$deploy_yml")
+  if [[ -z "$kamal_key" ]]; then
+    echo "  [skip] no config/deploy.yml or ssh.keys entry found for $project"
+  elif [[ "$kamal_key" != '~/.ssh/'* ]]; then
+    echo "  [skip] kamal ssh.keys entry $kamal_key is not under ~/.ssh/, leaving it alone"
+  else
+    # kamal_key keeps its leading ~ only for display; the path sent over the
+    # wire is HOME-relative so the sandbox's zsh login shell has no tilde to
+    # expand before sh -s ever sees the argument.
+    local kamal_relative kamal_status
+    kamal_relative=${kamal_key#\~/}
+    kamal_status=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_relative") $(printf %q "$key_name")" <<'REMOTE'
+set -eu
+relative_path=$1
+alias_key_name=$2
+expanded="$HOME/$relative_path"
+if [ -L "$expanded" ]; then
+  echo "symlink"
+elif [ -e "$expanded" ]; then
+  echo "file"
+else
+  mkdir -p "$(dirname "$expanded")"
+  ln -s "$HOME/.ssh/vinceworks/$alias_key_name" "$expanded"
+  echo "linked"
+fi
+REMOTE
+)
+    case "$kamal_status" in
+      symlink) echo "  [skip] $kamal_key is already a symlink in the sandbox" ;;
+      file) echo "  [skip] a real file already sits at $kamal_key in the sandbox; leaving it alone" ;;
+      linked) echo "  [symlinked] $kamal_key -> ~/.ssh/vinceworks/$key_name" ;;
+    esac
+  fi
+
+  step "10. [SANDBOX] verifying end-to-end access"
+  local verify_output
+  if verify_output=$(ssh "$SSH_HOST" "ssh -o BatchMode=yes -o ConnectTimeout=10 $(printf %q "$target") hostname"); then
+    echo "  [verified] $target replied: $verify_output"
+  else
+    echo "  [error] could not reach $target from the sandbox using the new key" >&2
+    exit 1
+  fi
+
+  step "done"
+  echo "${bold}$project can now reach ${green}$target${reset}${bold} from the sandbox.${reset}"
+  echo "Agents should ssh to \"$target\" — the same alias you use on this Mac."
+}
+
+cmd_ssh_grant() {
+  local project=${1:?project required} target=${2:?target required}
+  grant_ssh_access "$project" "$target"
+}
+
+# Runs under "sh -s" rather than the sandbox user's login shell (zsh), whose
+# default NOMATCH option would turn the unmatched *.target glob below into a
+# hard error instead of letting the [ -e "$f" ] guard skip it.
+fetch_grants_tsv() {
+  ssh "$SSH_HOST" "sh -s" <<'REMOTE'
+set -eu
+for f in "$HOME"/.ssh/vinceworks/*.target; do
+  [ -e "$f" ] || continue
+  key_name=$(basename "$f" .target)
+  project=$(sed -n "s/^project=//p" "$f")
+  target=$(sed -n "s/^target=//p" "$f")
+  hostname=$(sed -n "s/^hostname=//p" "$f")
+  port=$(sed -n "s/^port=//p" "$f")
+  user=$(sed -n "s/^user=//p" "$f")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$key_name" "$project" "$target" "$hostname" "$port" "$user"
+done
+REMOTE
+}
+
+cmd_ssh_list() {
+  local rows
+  rows=$(fetch_grants_tsv)
+  if [[ -z "$rows" ]]; then
+    echo "  no grants on record"
+    return
+  fi
+
+  printf '  %-16s %-16s %-28s %-10s %s\n' PROJECT TARGET HOSTNAME USER FINGERPRINT
+  local key_name project target hostname port user fingerprint
+  while IFS=$'\t' read -r key_name project target hostname port user; do
+    fingerprint=$(ssh -n "$SSH_HOST" "ssh-keygen -lf ~/.ssh/vinceworks/$(printf %q "$key_name").pub" 2>/dev/null) || fingerprint="unknown"
+    printf '  %-16s %-16s %-28s %-10s %s\n' "$project" "$target" "$hostname" "$user" "$fingerprint"
+  done <<<"$rows"
+}
+
+revoke_one_grant() {
+  local project=$1 target=$2 key_name=$3
+  local tag="vinceworks:$project:$target"
+
+  step "[PROD] removing the key from $target"
+  ssh "$target" "sh -s -- $(printf %q "$tag")" <<'REMOTE'
+set -eu
+tag=$1
+f="$HOME/.ssh/authorized_keys"
+[ -f "$f" ] || exit 0
+tmp=$(mktemp)
+grep -vF "$tag" "$f" >"$tmp" || true
+mv "$tmp" "$f"
+chmod 600 "$f"
+REMOTE
+  echo "  [removed] authorized_keys entry tagged $tag on $target"
+
+  step "[SANDBOX] cleaning up $key_name"
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$key_name") $(printf %q "$target")" <<'REMOTE'
+set -eu
+key_name=$1
+alias_name=$2
+vw="$HOME/.ssh/vinceworks"
+
+rm -f "$vw/$key_name" "$vw/$key_name.pub" "$vw/$key_name.target"
+
+config="$HOME/.ssh/config"
+if [ -f "$config" ]; then
+  expected_identity="~/.ssh/vinceworks/$key_name"
+  block_found=$(awk -v name="$alias_name" '
+    tolower($1) == "host" {
+      matched = 0
+      for (i = 2; i <= NF; i++) if ($i == name) matched = 1
+      if (matched) found = 1
+      in_block = matched
+      next
+    }
+    in_block && tolower($1) == "identityfile" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      identityfile = val
+    }
+    END {
+      print (found ? 1 : 0)
+      print identityfile
+    }
+  ' "$config")
+  found=$(printf '%s\n' "$block_found" | sed -n '1p')
+  identityfile=$(printf '%s\n' "$block_found" | sed -n '2p')
+
+  if [ "$found" = "1" ] && [ "$identityfile" != "$expected_identity" ]; then
+    echo "  [skip] leaving Host $alias_name in the sandbox's ~/.ssh/config; its IdentityFile is ${identityfile:-<none>}, not $expected_identity"
+  elif [ "$found" = "1" ]; then
+    awk -v name="$alias_name" '
+      BEGIN { skip = 0 }
+      tolower($1) == "host" {
+        matched = 0
+        for (i = 2; i <= NF; i++) if ($i == name) matched = 1
+        if (matched) { skip = 1; next }
+        skip = 0
+      }
+      skip && (/^[[:space:]]/ || NF == 0) { next }
+      skip { skip = 0 }
+      { print }
+    ' "$config" >"$config.tmp"
+    mv "$config.tmp" "$config"
+    echo "  [removed] Host $alias_name from the sandbox's ~/.ssh/config"
+  fi
+fi
+REMOTE
+
+  local deploy_yml="$LOCAL_PROJECTS/$project/config/deploy.yml"
+  local kamal_key
+  kamal_key=$(first_kamal_key "$deploy_yml")
+  if [[ -n "$kamal_key" && "$kamal_key" == '~/.ssh/'* ]]; then
+    local kamal_relative kamal_status
+    kamal_relative=${kamal_key#\~/}
+    kamal_status=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$kamal_relative") $(printf %q "$key_name")" <<'REMOTE'
+set -eu
+relative_path=$1
+key_name=$2
+expanded="$HOME/$relative_path"
+target_key="$HOME/.ssh/vinceworks/$key_name"
+if [ -L "$expanded" ] && [ "$(readlink "$expanded")" = "$target_key" ]; then
+  rm -f "$expanded"
+  echo "removed"
+fi
+REMOTE
+)
+    [[ "$kamal_status" == "removed" ]] && echo "  [removed] kamal symlink $kamal_key"
+  fi
+
+  echo "  [removed] key and marker for $key_name in the sandbox"
+}
+
+cmd_ssh_revoke() {
+  local project=${1:?project required} target=${2:-}
+
+  local rows
+  rows=$(fetch_grants_tsv | awk -F'\t' -v p="$project" '$2 == p')
+  if [[ -z "$rows" ]]; then
+    echo "  [error] no grants on record for $project" >&2
+    exit 1
+  fi
+  if [[ -n "$target" ]]; then
+    rows=$(awk -F'\t' -v t="$target" '$3 == t' <<<"$rows")
+    [[ -n "$rows" ]] || { echo "  [error] no grant on record for $project on $target" >&2; exit 1; }
+  fi
+
+  step "grants queued for revoke"
+  local key_name grant_project grant_target hostname port user
+  while IFS=$'\t' read -r key_name grant_project grant_target hostname port user; do
+    echo "  - $grant_target ($hostname, key $key_name)"
+  done <<<"$rows"
+
+  local confirm_msg
+  if [[ -n "$target" ]]; then
+    confirm_msg="Revoke $project's access to $target"
+  else
+    confirm_msg="Revoke all of $project's grants"
+  fi
+  if ! confirm "$confirm_msg"; then
+    echo "  [abort] nothing revoked" >&2
+    exit 1
+  fi
+
+  while IFS=$'\t' read -r key_name grant_project grant_target hostname port user; do
+    revoke_one_grant "$grant_project" "$grant_target" "$key_name"
+  done <<<"$rows"
+
+  note "vinceworks-audit.conf is left in place; other grants on these hosts may still depend on it"
+}
+
 cmd_push() {
+  local -a positional=()
+  local ssh_target=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ssh) ssh_target=${2:?--ssh requires a target}; shift 2 ;;
+      *) positional+=("$1"); shift ;;
+    esac
+  done
+  set -- ${positional[@]+"${positional[@]}"}
+
   local arg=${1:?url or name required} name url local_dir
   shift
   if [[ "$arg" =~ ^(https?://|git@|ssh://) ]]; then
@@ -63,6 +583,10 @@ cmd_push() {
       copy_file "$name" "${path#"$local_dir"/}"
     done
   fi
+
+  if [[ -n "$ssh_target" ]]; then
+    grant_ssh_access "$name" "$ssh_target"
+  fi
 }
 
 command=${1:-}
@@ -73,6 +597,9 @@ case "$command" in
   up|rebuild|status) remote "$command" ;;
   push) cmd_push "$@" ;;
   ps) ssh "$SSH_HOST" '~/vinceworks/sandbox/ps' ;;
+  ssh-grant) cmd_ssh_grant "$@" ;;
+  ssh-revoke) cmd_ssh_revoke "$@" ;;
+  ssh-list) cmd_ssh_list "$@" ;;
   -h|--help|help) usage ;;
   *) usage ;;
 esac

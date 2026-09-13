@@ -43,14 +43,11 @@ print_keygen_walkthrough() {
   echo "3. Here's the provisioning script - review it, then run it manually as root on $host:"
   cat <<PROVISION
 #!/usr/bin/env bash
-# Provisioning for $tag. Not run automatically by vinceworks - copy, review, run as root.
 set -euo pipefail
 
 BOT_USER=$BOT_USER
 
 if ! id "\$BOT_USER" &>/dev/null; then
-  # Needs a real shell, not nologin/false: sshd runs the authorized_keys
-  # forced command via the account's login shell, so nologin would block it.
   useradd --system --create-home --shell /bin/bash "\$BOT_USER"
 fi
 
@@ -58,22 +55,6 @@ install -d -m 700 -o "\$BOT_USER" -g "\$BOT_USER" "/home/\$BOT_USER/.ssh"
 touch "/home/\$BOT_USER/.ssh/authorized_keys"
 chmod 600 "/home/\$BOT_USER/.ssh/authorized_keys"
 chown "\$BOT_USER:\$BOT_USER" "/home/\$BOT_USER/.ssh/authorized_keys"
-
-# The authorized_keys line for '$tag' is appended in step 8 of the
-# vinceworks ssh keygen walkthrough, run from your Mac after this script.
-
-# --- remaining manual steps ---
-# 1. Confirm rrsync is on \$BOT_USER's PATH - it ships with rsync but isn't
-#    always symlinked into /usr/bin (check /usr/share/doc/rsync*/scripts/rrsync).
-# 2. Add an sshd Match block for \$BOT_USER (e.g. a drop-in under
-#    /etc/ssh/sshd_config.d/) setting 'LogLevel VERBOSE' so the key
-#    fingerprint is logged on every connection.
-# 3. Confirm \$BOT_USER cannot read secrets anywhere on this box (.env
-#    files, credential files, other projects' config, etc, wherever they
-#    live on $host). This key gets whole-filesystem read access as
-#    readable by \$BOT_USER, so \$BOT_USER's own file permissions are the
-#    only thing standing between it and any secret it can see - check it
-#    by hand, this script does not guess your ACLs.
 PROVISION
   read -rp "Press Enter to continue... "
 

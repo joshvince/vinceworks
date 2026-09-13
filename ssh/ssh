@@ -32,12 +32,13 @@ print_keygen_walkthrough() {
   # that string early and break the pasted command.
   local authorized_keys_line_escaped=${authorized_keys_line//\"/\\\"}
 
-  local bold=$'\033[1m' italic=$'\033[3m' cyan=$'\033[36m' reset=$'\033[0m'
+  local bold=$'\033[1m' italic=$'\033[3m' cyan=$'\033[36m' green=$'\033[32m' reset=$'\033[0m'
   local rule="────────────────────────────────────────"
 
   step() { echo; echo "$rule"; echo "${bold}$1${reset}"; echo; }
   note() { echo "${italic}$1${reset}"; }
   prompt() { echo; read -rp "${cyan}$1${reset}"; }
+  cmd() { echo "${green}$1${reset}"; }
 
   step "1. [MAC] 🎯  Where's $tag actually reachable?"
   note "An ssh config alias you can ssh to directly from this Mac (a bare hostname or IP works too) - \"$host\" is just this key's label, not assumed to be reachable. Used in every command below."
@@ -113,44 +114,44 @@ REMOTE
   echo "${bold}== next steps (run these yourself - nothing below is automated) ==${reset}"
 
   step "5. [MAC] 📤  Copy ssh/provision-bot-user.sh to $ssh_alias"
-  echo "  scp $SSH_DIR/provision-bot-user.sh $ssh_alias:~/provision-bot-user.sh"
+  cmd "  scp $SSH_DIR/provision-bot-user.sh $ssh_alias:~/provision-bot-user.sh"
   prompt "Press Enter once that's done... "
 
   step "6. [MAC] 🔗  SSH to $ssh_alias"
-  echo "  ssh $ssh_alias"
+  cmd "  ssh $ssh_alias"
   prompt "Press Enter once that's done... "
 
   step "7. [SERVER] ⚙️   Run the script as root, in that same session (it deletes itself once it succeeds)"
-  echo "  sudo bash ~/provision-bot-user.sh"
+  cmd "  sudo bash ~/provision-bot-user.sh"
   prompt "Press Enter once that's done... "
 
   step "8. [MAC] ➕  Append the authorized_keys line to $BOT_USER's file on $host"
   note "Run this from your Mac - don't paste the raw line anywhere yourself, this command does the appending for you:"
   echo
-  echo "  ssh $ssh_alias \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
+  cmd "  ssh $ssh_alias \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
   prompt "Press Enter once that's done... "
 
   step "9. [SERVER] 🔍  Check rrsync is on $BOT_USER's PATH, on $host"
-  echo "  sudo -u $BOT_USER which rrsync"
+  cmd "  sudo -u $BOT_USER which rrsync"
   echo
   note "If that prints nothing, find it (it ships with rsync but usually isn't linked onto PATH) and install it:"
   echo
-  echo "  sudo find / -iname 'rrsync*' 2>/dev/null"
+  cmd "  sudo find / -iname 'rrsync*' 2>/dev/null"
   echo
-  echo "  sudo install -m 755 <path found above> /usr/local/bin/rrsync"
+  cmd "  sudo install -m 755 <path found above> /usr/local/bin/rrsync"
   prompt "Press Enter once rrsync resolves for $BOT_USER... "
 
   step "10. [SERVER] 📝  Add an sshd Match block for $BOT_USER with LogLevel VERBOSE, on $host"
-  echo "  sudo tee /etc/ssh/sshd_config.d/$BOT_USER.conf <<'CONF'"
-  echo "Match User $BOT_USER"
-  echo "    LogLevel VERBOSE"
-  echo "CONF"
+  cmd "  sudo tee /etc/ssh/sshd_config.d/$BOT_USER.conf <<'CONF'"
+  cmd "Match User $BOT_USER"
+  cmd "    LogLevel VERBOSE"
+  cmd "CONF"
   echo
-  echo "  sudo sshd -t && sudo systemctl reload sshd"
+  cmd "  sudo sshd -t && sudo systemctl reload sshd"
   echo
   note "Verify it's applied:"
   echo
-  echo "  sudo sshd -T -C user=$BOT_USER | grep -i loglevel"
+  cmd "  sudo sshd -T -C user=$BOT_USER | grep -i loglevel"
   prompt "Press Enter once that's applied... "
 
   step "11. [SERVER] 🔒  Confirm $BOT_USER can't read secrets anywhere it has access to, on $host"
@@ -158,21 +159,21 @@ REMOTE
   prompt "Press Enter once you've confirmed this... "
 
   step "12. [MAC] 🧪  SSH to the sandbox to test the key end to end"
-  echo "  ssh $SSH_HOST"
+  cmd "  ssh $SSH_HOST"
   prompt "Press Enter once that's done... "
 
   step "13. [SANDBOX] 📥  Test read access, in that same sandbox session"
   note "This should succeed and print a hostname:"
   echo
-  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@$ssh_alias:/etc/hostname /tmp/ && cat /tmp/hostname"
+  cmd "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@$ssh_alias:/etc/hostname /tmp/ && cat /tmp/hostname"
   prompt "Press Enter once that's succeeded... "
 
   step "14. [SANDBOX] 🚫  Test that writing is blocked, in that same sandbox session"
   note "This should be refused - if it succeeds instead, the forced command isn't restricting writes and needs fixing before this key is trusted:"
   echo
-  echo "  echo test > /tmp/vinceworks-write-test.txt"
+  cmd "  echo test > /tmp/vinceworks-write-test.txt"
   echo
-  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@$ssh_alias:/tmp/"
+  cmd "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@$ssh_alias:/tmp/"
   prompt "Press Enter once that's confirmed refused... "
 
   echo

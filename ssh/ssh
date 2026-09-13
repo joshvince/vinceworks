@@ -18,13 +18,13 @@ USAGE
   exit 1
 }
 
-# Asks where the box actually is, then walks through 13 paced steps:
-# reveal the public key and authorized_keys line, the manual production
-# setup steps (using the ssh-target given up front, interpolated into
-# every command), then an end-to-end read/write test. Shared by both
-# the fresh-generation and --resume paths in cmd_keygen, which must set
-# project, host, tag, pubkey, key_type, key_data and key_name before
-# calling this.
+# Walks through 14 paced steps: resolve the ssh alias for the box through the
+# Mac's ssh config and mirror it into the sandbox's config so the same alias
+# works in both places, reveal the public key and authorized_keys line, the
+# manual production setup steps, then an end-to-end read/write test. Shared by
+# both the fresh-generation and --resume paths in cmd_keygen, which must set
+# project, host, tag, pubkey, key_type, key_data and key_name before calling
+# this.
 print_keygen_walkthrough() {
   local authorized_keys_line="restrict,command=\"rrsync -ro /\" $key_type $key_data $tag"
   # Double quotes escaped for step 3 below, where the line is embedded inside
@@ -40,18 +40,70 @@ print_keygen_walkthrough() {
   prompt() { echo; read -rp "${cyan}$1${reset}"; }
 
   step "1. 🎯  Where's $tag actually reachable?"
-  note "Hostname, IP, or an ssh config alias you can ssh to directly - \"$host\" is just this key's label, not assumed to be reachable. Used in every command below."
-  local ssh_target=""
-  while [[ -z "$ssh_target" ]]; do
+  note "An ssh config alias you can ssh to directly from this Mac (a bare hostname or IP works too) - \"$host\" is just this key's label, not assumed to be reachable. Used in every command below."
+  local ssh_alias="" resolved_config="" resolved_hostname="" resolved_port="" resolved_user=""
+  local alias_lowercased host_lowercased confirmation
+  while true; do
     echo
-    read -rp "${cyan}ssh-target: ${reset}" ssh_target
+    read -rp "${cyan}ssh-target: ${reset}" ssh_alias
+    [[ -n "$ssh_alias" ]] || continue
+
+    resolved_config=$(ssh -G "$ssh_alias" 2>/dev/null)
+    resolved_hostname=$(awk '$1 == "hostname" { print $2; exit }' <<<"$resolved_config")
+    resolved_port=$(awk '$1 == "port" { print $2; exit }' <<<"$resolved_config")
+    resolved_user=$(awk '$1 == "user" { print $2; exit }' <<<"$resolved_config")
+
+    # ssh -G echoes the alias straight back as the hostname when nothing matched.
+    alias_lowercased=$(printf '%s' "$ssh_alias" | tr '[:upper:]' '[:lower:]')
+    host_lowercased=$(printf '%s' "$resolved_hostname" | tr '[:upper:]' '[:lower:]')
+    if [[ -z "$resolved_hostname" || "$alias_lowercased" == "$host_lowercased" ]]; then
+      echo
+      note "⚠️   No Host block for \"$ssh_alias\" in your ssh config. That's fine if you typed a literal hostname or IP - otherwise it's a typo."
+      echo
+      read -rp "${cyan}Use \"$ssh_alias\" exactly as typed? [y/N]: ${reset}" confirmation
+      [[ "$confirmation" =~ ^[Yy]([Ee][Ss])?$ ]] || continue
+    fi
+
+    echo
+    note "$ssh_alias resolves to $resolved_hostname port $resolved_port as $resolved_user"
+    break
   done
 
-  step "2. 🔑  Public key for $tag"
+  step "2. 🛰️   Teaching the sandbox the same \"$ssh_alias\" alias"
+  note "The sandbox is a different machine with its own ~/.ssh/config, so the later steps that run there need the alias too:"
+  echo
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$ssh_alias") $(printf %q "$resolved_hostname") $(printf %q "$resolved_port")" <<'REMOTE'
+set -eu
+alias_name=$1
+alias_hostname=$2
+alias_port=$3
+config=$HOME/.ssh/config
+
+mkdir -p "$HOME/.ssh"
+chmod 700 "$HOME/.ssh"
+touch "$config"
+chmod 600 "$config"
+
+if awk -v name="$alias_name" '
+     tolower($1) == "host" { for (i = 2; i <= NF; i++) if ($i == name) found = 1 }
+     END { exit found ? 0 : 1 }
+   ' "$config"; then
+  echo "  Host $alias_name is already in the sandbox's ~/.ssh/config - leaving it as it is."
+  exit 0
+fi
+
+# No User line on purpose: the sandbox connects as vinceworks-bot, which the
+# rsync steps pass explicitly, so the Mac's user would be silently wrong here.
+printf '\nHost %s\n    HostName %s\n    Port %s\n' "$alias_name" "$alias_hostname" "$alias_port" >>"$config"
+echo "  Added Host $alias_name to the sandbox's ~/.ssh/config."
+REMOTE
+  prompt "Press Enter to continue... "
+
+  step "3. 🔑  Public key for $tag"
   echo "$pubkey"
   prompt "Press Enter to continue... "
 
-  step "3. 🔐  authorized_keys line for $BOT_USER on $host (tagged for revoke)"
+  step "4. 🔐  authorized_keys line for $BOT_USER on $host (tagged for revoke)"
   note "This is the line sshd checks when this key tries to log in - restrict,command=\"rrsync -ro /\" forces every connection using this key into a read-only rsync no matter what command is actually sent; the tag on the end is just a label for later revoke, not functional to SSH:"
   echo
   echo "$authorized_keys_line"
@@ -60,25 +112,25 @@ print_keygen_walkthrough() {
   echo
   echo "${bold}== next steps (run these yourself - nothing below is automated) ==${reset}"
 
-  step "4. 📤  Copy ssh/provision-bot-user.sh to $ssh_target"
-  echo "  scp $SSH_DIR/provision-bot-user.sh $ssh_target:~/provision-bot-user.sh"
+  step "5. 📤  Copy ssh/provision-bot-user.sh to $ssh_alias"
+  echo "  scp $SSH_DIR/provision-bot-user.sh $ssh_alias:~/provision-bot-user.sh"
   prompt "Press Enter once that's done... "
 
-  step "5. 🔗  SSH to $ssh_target"
-  echo "  ssh $ssh_target"
+  step "6. 🔗  SSH to $ssh_alias"
+  echo "  ssh $ssh_alias"
   prompt "Press Enter once that's done... "
 
-  step "6. ⚙️   Run the script as root, in that same session (it deletes itself once it succeeds)"
+  step "7. ⚙️   Run the script as root, in that same session (it deletes itself once it succeeds)"
   echo "  sudo bash ~/provision-bot-user.sh"
   prompt "Press Enter once that's done... "
 
-  step "7. ➕  Append the authorized_keys line to $BOT_USER's file on $host"
+  step "8. ➕  Append the authorized_keys line to $BOT_USER's file on $host"
   note "Run this from your Mac - don't paste the raw line anywhere yourself, this command does the appending for you:"
   echo
-  echo "  ssh $ssh_target \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
+  echo "  ssh $ssh_alias \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
   prompt "Press Enter once that's done... "
 
-  step "8. 🔍  Check rrsync is on $BOT_USER's PATH, on $host"
+  step "9. 🔍  Check rrsync is on $BOT_USER's PATH, on $host"
   echo "  sudo -u $BOT_USER which rrsync"
   echo
   note "If that prints nothing, find it (it ships with rsync but usually isn't linked onto PATH) and install it:"
@@ -88,7 +140,7 @@ print_keygen_walkthrough() {
   echo "  sudo install -m 755 <path found above> /usr/local/bin/rrsync"
   prompt "Press Enter once rrsync resolves for $BOT_USER... "
 
-  step "9. 📝  Add an sshd Match block for $BOT_USER with LogLevel VERBOSE, on $host"
+  step "10. 📝  Add an sshd Match block for $BOT_USER with LogLevel VERBOSE, on $host"
   echo "  sudo tee /etc/ssh/sshd_config.d/$BOT_USER.conf <<'CONF'"
   echo "Match User $BOT_USER"
   echo "    LogLevel VERBOSE"
@@ -101,26 +153,26 @@ print_keygen_walkthrough() {
   echo "  sudo sshd -T -C user=$BOT_USER | grep -i loglevel"
   prompt "Press Enter once that's applied... "
 
-  step "10. 🔒  Confirm $BOT_USER can't read secrets anywhere it has access to, on $host"
+  step "11. 🔒  Confirm $BOT_USER can't read secrets anywhere it has access to, on $host"
   note "(.env files, credential files, other projects' config, etc, wherever they live on this box)"
   prompt "Press Enter once you've confirmed this... "
 
-  step "11. 🧪  SSH to the sandbox to test the key end to end"
+  step "12. 🧪  SSH to the sandbox to test the key end to end"
   echo "  ssh $SSH_HOST"
   prompt "Press Enter once that's done... "
 
-  step "12. 📥  Test read access, in that same sandbox session"
+  step "13. 📥  Test read access, in that same sandbox session"
   note "This should succeed and print a hostname:"
   echo
-  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@$ssh_target:/etc/hostname /tmp/ && cat /tmp/hostname"
+  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@$ssh_alias:/etc/hostname /tmp/ && cat /tmp/hostname"
   prompt "Press Enter once that's succeeded... "
 
-  step "13. 🚫  Test that writing is blocked, in that same sandbox session"
+  step "14. 🚫  Test that writing is blocked, in that same sandbox session"
   note "This should be refused - if it succeeds instead, the forced command isn't restricting writes and needs fixing before this key is trusted:"
   echo
   echo "  echo test > /tmp/vinceworks-write-test.txt"
   echo
-  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@$ssh_target:/tmp/"
+  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@$ssh_alias:/tmp/"
   prompt "Press Enter once that's confirmed refused... "
 
   echo

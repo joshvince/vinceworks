@@ -35,7 +35,7 @@ print_keygen_walkthrough() {
 
   step() { echo; echo "$rule"; echo "${bold}$1${reset}"; echo; }
   note() { echo "${italic}$1${reset}"; }
-  prompt() { read -rp "${cyan}$1${reset}"; }
+  prompt() { echo; read -rp "${cyan}$1${reset}"; }
 
   step "1. 🔑  Public key for $tag"
   echo "$pubkey"

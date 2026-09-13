@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       openssh-client openssh-server gnupg unzip jq ripgrep tzdata procps iproute2 \
       libssl-dev zlib1g-dev libyaml-dev libffi-dev libgmp-dev libreadline-dev libncurses-dev \
       libvips libpq-dev postgresql postgresql-client sqlite3 libsqlite3-dev libjemalloc2 rustc \
+      rsync \
     && mkdir -p /run/sshd \
     && rm -rf /var/lib/apt/lists/*
 

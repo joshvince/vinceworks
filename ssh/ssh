@@ -30,21 +30,22 @@ print_keygen_walkthrough() {
   # that string early and break the pasted command.
   local authorized_keys_line_escaped=${authorized_keys_line//\"/\\\"}
 
-  local bold=$'\033[1m' italic=$'\033[3m' reset=$'\033[0m'
+  local bold=$'\033[1m' italic=$'\033[3m' cyan=$'\033[36m' reset=$'\033[0m'
   local rule="────────────────────────────────────────"
 
-  step() { echo; echo "$rule"; echo "${bold}$1${reset}"; }
+  step() { echo; echo "$rule"; echo "${bold}$1${reset}"; echo; }
   note() { echo "${italic}$1${reset}"; }
+  prompt() { read -rp "${cyan}$1${reset}"; }
 
   step "1. 🔑  Public key for $tag"
   echo "$pubkey"
-  read -rp "Press Enter to continue... "
+  prompt "Press Enter to continue... "
 
   step "2. 🔐  authorized_keys line for $BOT_USER on $host (tagged for revoke)"
   note "This is the line sshd checks when this key tries to log in - restrict,command=\"rrsync -ro /\" forces every connection using this key into a read-only rsync no matter what command is actually sent; the tag on the end is just a label for later revoke, not functional to SSH:"
   echo
   echo "$authorized_keys_line"
-  read -rp "Press Enter to continue... "
+  prompt "Press Enter to continue... "
 
   echo
   echo "${bold}== next steps (run these yourself - nothing below is automated) ==${reset}"
@@ -53,21 +54,21 @@ print_keygen_walkthrough() {
   note "Replace <ssh-target> below with wherever that box actually is for you (hostname, IP, or your own ssh config alias) - \"$host\" is just this key's label, not assumed to be reachable:"
   echo
   echo "  scp $SSH_DIR/provision-bot-user.sh <ssh-target>:~/provision-bot-user.sh"
-  read -rp "Press Enter once that's done... "
+  prompt "Press Enter once that's done... "
 
   step "4. 🔗  SSH to <ssh-target>"
   echo "  ssh <ssh-target>"
-  read -rp "Press Enter once that's done... "
+  prompt "Press Enter once that's done... "
 
   step "5. ⚙️   Run the script as root, in that same session (it deletes itself once it succeeds)"
   echo "  sudo bash ~/provision-bot-user.sh"
-  read -rp "Press Enter once that's done... "
+  prompt "Press Enter once that's done... "
 
   step "6. ➕  Append the authorized_keys line to $BOT_USER's file on $host"
   note "Run this from your Mac (same <ssh-target> as above) - don't paste the raw line anywhere yourself, this command does the appending for you:"
   echo
   echo "  ssh <ssh-target> \"echo '$authorized_keys_line_escaped' | sudo tee -a /home/$BOT_USER/.ssh/authorized_keys\""
-  read -rp "Press Enter once that's done... "
+  prompt "Press Enter once that's done... "
 
   step "7. 🔍  Check rrsync is on $BOT_USER's PATH, on $host"
   echo "  sudo -u $BOT_USER which rrsync"
@@ -75,41 +76,44 @@ print_keygen_walkthrough() {
   note "If that prints nothing, find it (it ships with rsync but usually isn't linked onto PATH) and install it:"
   echo
   echo "  sudo find / -iname 'rrsync*' 2>/dev/null"
+  echo
   echo "  sudo install -m 755 <path found above> /usr/local/bin/rrsync"
-  read -rp "Press Enter once rrsync resolves for $BOT_USER... "
+  prompt "Press Enter once rrsync resolves for $BOT_USER... "
 
   step "8. 📝  Add an sshd Match block for $BOT_USER with LogLevel VERBOSE, on $host"
   echo "  sudo tee /etc/ssh/sshd_config.d/$BOT_USER.conf <<'CONF'"
   echo "Match User $BOT_USER"
   echo "    LogLevel VERBOSE"
   echo "CONF"
+  echo
   echo "  sudo sshd -t && sudo systemctl reload sshd"
   echo
   note "Verify it's applied:"
   echo
   echo "  sudo sshd -T -C user=$BOT_USER | grep -i loglevel"
-  read -rp "Press Enter once that's applied... "
+  prompt "Press Enter once that's applied... "
 
   step "9. 🔒  Confirm $BOT_USER can't read secrets anywhere it has access to, on $host"
   note "(.env files, credential files, other projects' config, etc, wherever they live on this box)"
-  read -rp "Press Enter once you've confirmed this... "
+  prompt "Press Enter once you've confirmed this... "
 
   step "10. 🧪  SSH to the sandbox to test the key end to end"
   echo "  ssh $SSH_HOST"
-  read -rp "Press Enter once that's done... "
+  prompt "Press Enter once that's done... "
 
   step "11. 📥  Test read access, in that same sandbox session"
   note "Replace <ssh-target> with the same box as before. This should succeed and print a hostname:"
   echo
   echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@<ssh-target>:/etc/hostname /tmp/ && cat /tmp/hostname"
-  read -rp "Press Enter once that's succeeded... "
+  prompt "Press Enter once that's succeeded... "
 
   step "12. 🚫  Test that writing is blocked, in that same sandbox session"
   note "This should be refused - if it succeeds instead, the forced command isn't restricting writes and needs fixing before this key is trusted:"
   echo
   echo "  echo test > /tmp/vinceworks-write-test.txt"
+  echo
   echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@<ssh-target>:/tmp/"
-  read -rp "Press Enter once that's confirmed refused... "
+  prompt "Press Enter once that's confirmed refused... "
 
   echo
   echo "$rule"

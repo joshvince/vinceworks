@@ -63,8 +63,12 @@ print_keygen_walkthrough() {
   read -rp "Press Enter once that's done... "
 
   echo
-  echo "7. On $host, confirm rrsync is on $BOT_USER's PATH (ships with rsync, not always symlinked into /usr/bin)."
-  read -rp "Press Enter once you've confirmed this... "
+  echo "7. On $host, check rrsync is on $BOT_USER's PATH:"
+  echo "     sudo -u $BOT_USER which rrsync"
+  echo "   If that prints nothing, find it (it ships with rsync but usually isn't linked onto PATH) and install it:"
+  echo "     sudo find / -iname 'rrsync*' 2>/dev/null"
+  echo "     sudo install -m 755 <path found above> /usr/local/bin/rrsync"
+  read -rp "Press Enter once rrsync resolves for $BOT_USER... "
 
   echo
   echo "8. On $host, confirm sshd has a Match block for $BOT_USER with LogLevel VERBOSE."

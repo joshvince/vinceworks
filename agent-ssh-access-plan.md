@@ -24,7 +24,7 @@ An agent working on a project should be able to pull files (config, logs, data) 
 
 - `vinceworks ssh keygen <project> <host>` — generates the ed25519 keypair, writes the private half to disk in the sandbox (`chmod 600`), and prints:
   - the public key plus the forced-command, tagged `authorized_keys` line
-  - a provisioning script for the bot user + sshd hardening (grants, secrets exclusion, `LogLevel VERBOSE`), for me to run manually as root on the box
+  - the static, checked-in provisioning script for the bot user + sshd hardening (`ssh/provision-bot-user.sh`; grants, secrets exclusion, `LogLevel VERBOSE`), for me to run manually as root on the box
 - `vinceworks ssh install <project> <host>` — run from the Mac, never the sandbox. SSHes in with my own admin key, appends the forced-command line to the bot user's `authorized_keys`, and pins the box's host key into the sandbox's `known_hosts`.
 - `vinceworks ssh revoke <project> <host>` — run from the Mac. Strips the tagged `authorized_keys` line and deletes the key file from the sandbox.
 

@@ -71,8 +71,15 @@ print_keygen_walkthrough() {
   read -rp "Press Enter once rrsync resolves for $BOT_USER... "
 
   echo
-  echo "8. On $host, confirm sshd has a Match block for $BOT_USER with LogLevel VERBOSE."
-  read -rp "Press Enter once you've confirmed this... "
+  echo "8. On $host, add an sshd Match block for $BOT_USER with LogLevel VERBOSE:"
+  echo "     sudo tee /etc/ssh/sshd_config.d/$BOT_USER.conf <<'CONF'"
+  echo "Match User $BOT_USER"
+  echo "    LogLevel VERBOSE"
+  echo "CONF"
+  echo "     sudo sshd -t && sudo systemctl reload sshd"
+  echo "   Verify it's applied:"
+  echo "     sudo sshd -T -C user=$BOT_USER | grep -i loglevel"
+  read -rp "Press Enter once that's applied... "
 
   echo
   echo "9. On $host, confirm $BOT_USER cannot read secrets anywhere it has access to (.env files, credential files, other projects' config, etc, wherever they live on this box)."

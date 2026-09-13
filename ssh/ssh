@@ -71,13 +71,14 @@ print_keygen_walkthrough() {
   done
 
   step "2. [SANDBOX] 🛰️   Teaching the sandbox the same \"$ssh_alias\" alias"
-  note "The sandbox is a different machine with its own ~/.ssh/config, so the later steps that run there need the alias too:"
+  note "The sandbox is a different machine with its own ~/.ssh/config, so the later steps that run there need the alias too, wired to connect as $BOT_USER with its scoped key:"
   echo
-  ssh "$SSH_HOST" "sh -s -- $(printf %q "$ssh_alias") $(printf %q "$resolved_hostname") $(printf %q "$resolved_port")" <<'REMOTE'
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$ssh_alias") $(printf %q "$resolved_hostname") $(printf %q "$resolved_port") $(printf %q "$key_name")" <<'REMOTE'
 set -eu
 alias_name=$1
 alias_hostname=$2
 alias_port=$3
+alias_key_name=$4
 config=$HOME/.ssh/config
 
 mkdir -p "$HOME/.ssh"
@@ -93,9 +94,14 @@ if awk -v name="$alias_name" '
   exit 0
 fi
 
-# No User line on purpose: the sandbox connects as vinceworks-bot, which the
-# rsync steps pass explicitly, so the Mac's user would be silently wrong here.
-printf '\nHost %s\n    HostName %s\n    Port %s\n' "$alias_name" "$alias_hostname" "$alias_port" >>"$config"
+# This alias is bot-scoped in the sandbox specifically: agent-facing sessions
+# here should always resolve straight to vinceworks-bot and its scoped key,
+# without the agent needing to know either detail. The same alias name on the
+# Mac stays admin-scoped in the Mac's own ~/.ssh/config, untouched - that
+# split is intentional, not an oversight. IdentitiesOnly stops ssh offering
+# the agent's own default keys first and getting rejected before trying this
+# one.
+printf '\nHost %s\n    HostName %s\n    Port %s\n    User vinceworks-bot\n    IdentityFile ~/.ssh/vinceworks-bot/%s\n    IdentitiesOnly yes\n' "$alias_name" "$alias_hostname" "$alias_port" "$alias_key_name" >>"$config"
 echo "  Added Host $alias_name to the sandbox's ~/.ssh/config."
 REMOTE
   prompt "Press Enter to continue... "

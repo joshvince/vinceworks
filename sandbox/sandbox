@@ -140,6 +140,55 @@ grant_ssh_access() {
     exit 1
   fi
 
+  local host_block existing_found existing_identity existing_user
+  host_block=$(ssh "$SSH_HOST" "sh -s -- $(printf %q "$target")" <<'REMOTE'
+set -eu
+alias_name=$1
+config="$HOME/.ssh/config"
+if [ -f "$config" ]; then
+  awk -v name="$alias_name" '
+    tolower($1) == "host" {
+      matched = 0
+      for (i = 2; i <= NF; i++) if ($i == name) matched = 1
+      if (matched) found = 1
+      in_block = matched
+      next
+    }
+    in_block && tolower($1) == "identityfile" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      identityfile = val
+    }
+    in_block && tolower($1) == "user" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      user = val
+    }
+    END {
+      print (found ? 1 : 0)
+      print identityfile
+      print user
+    }
+  ' "$config"
+else
+  printf '0\n\n\n'
+fi
+REMOTE
+)
+  existing_found=$(sed -n '1p' <<<"$host_block")
+  existing_identity=$(sed -n '2p' <<<"$host_block")
+  existing_user=$(sed -n '3p' <<<"$host_block")
+
+  # A pre-existing block for a different key means step 7 would silently skip
+  # and agents would ssh through someone else's identity; catch that now.
+  if [[ "$existing_found" == "1" && "$existing_identity" != "~/.ssh/vinceworks/$key_name" ]]; then
+    echo "  [error] Host $target already exists in the sandbox's ~/.ssh/config, pointing elsewhere:" >&2
+    echo "    IdentityFile: ${existing_identity:-<none>}" >&2
+    echo "    User:         ${existing_user:-<none>}" >&2
+    echo "  Remove or rename that Host block in the sandbox's ~/.ssh/config before granting $project access to $target." >&2
+    exit 1
+  fi
+
   step "2. [SANDBOX] generating a scoped keypair"
   ssh "$SSH_HOST" "mkdir -p -m 700 ~/.ssh/vinceworks && ssh-keygen -t ed25519 -N '' -C $(printf %q "$tag") -f ~/.ssh/vinceworks/$(printf %q "$key_name") -q"
   local pubkey fingerprint
@@ -371,19 +420,46 @@ rm -f "$vw/$key_name" "$vw/$key_name.pub" "$vw/$key_name.target"
 
 config="$HOME/.ssh/config"
 if [ -f "$config" ]; then
-  awk -v name="$alias_name" '
-    BEGIN { skip = 0 }
+  expected_identity="~/.ssh/vinceworks/$key_name"
+  block_found=$(awk -v name="$alias_name" '
     tolower($1) == "host" {
       matched = 0
       for (i = 2; i <= NF; i++) if ($i == name) matched = 1
-      if (matched) { skip = 1; next }
-      skip = 0
+      if (matched) found = 1
+      in_block = matched
+      next
     }
-    skip && (/^[[:space:]]/ || NF == 0) { next }
-    skip { skip = 0 }
-    { print }
-  ' "$config" >"$config.tmp"
-  mv "$config.tmp" "$config"
+    in_block && tolower($1) == "identityfile" {
+      val = $2
+      gsub(/^"|"$/, "", val)
+      identityfile = val
+    }
+    END {
+      print (found ? 1 : 0)
+      print identityfile
+    }
+  ' "$config")
+  found=$(printf '%s\n' "$block_found" | sed -n '1p')
+  identityfile=$(printf '%s\n' "$block_found" | sed -n '2p')
+
+  if [ "$found" = "1" ] && [ "$identityfile" != "$expected_identity" ]; then
+    echo "  [skip] leaving Host $alias_name in the sandbox's ~/.ssh/config; its IdentityFile is ${identityfile:-<none>}, not $expected_identity"
+  elif [ "$found" = "1" ]; then
+    awk -v name="$alias_name" '
+      BEGIN { skip = 0 }
+      tolower($1) == "host" {
+        matched = 0
+        for (i = 2; i <= NF; i++) if ($i == name) matched = 1
+        if (matched) { skip = 1; next }
+        skip = 0
+      }
+      skip && (/^[[:space:]]/ || NF == 0) { next }
+      skip { skip = 0 }
+      { print }
+    ' "$config" >"$config.tmp"
+    mv "$config.tmp" "$config"
+    echo "  [removed] Host $alias_name from the sandbox's ~/.ssh/config"
+  fi
 fi
 REMOTE
 
@@ -404,7 +480,7 @@ fi
 REMOTE
   fi
 
-  echo "  [removed] key, marker and Host block for $key_name in the sandbox"
+  echo "  [removed] key and marker for $key_name in the sandbox"
 }
 
 cmd_ssh_revoke() {

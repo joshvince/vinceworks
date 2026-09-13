@@ -18,10 +18,11 @@ USAGE
   exit 1
 }
 
-# Walks through 9 paced steps: reveal the public key and authorized_keys
-# line, then the manual production setup steps. Shared by both the
-# fresh-generation and --resume paths in cmd_keygen, which must set
-# project, host, tag, pubkey, key_type and key_data before calling this.
+# Walks through 12 paced steps: reveal the public key and authorized_keys
+# line, the manual production setup steps, then an end-to-end read/write
+# test. Shared by both the fresh-generation and --resume paths in
+# cmd_keygen, which must set project, host, tag, pubkey, key_type,
+# key_data and key_name before calling this.
 print_keygen_walkthrough() {
   local authorized_keys_line="restrict,command=\"rrsync -ro /\" $key_type $key_data $tag"
   # Double quotes escaped for step 3 below, where the line is embedded inside
@@ -92,6 +93,23 @@ print_keygen_walkthrough() {
   step "9. 🔒  Confirm $BOT_USER can't read secrets anywhere it has access to, on $host"
   note "(.env files, credential files, other projects' config, etc, wherever they live on this box)"
   read -rp "Press Enter once you've confirmed this... "
+
+  step "10. 🧪  SSH to the sandbox to test the key end to end"
+  echo "  ssh $SSH_HOST"
+  read -rp "Press Enter once that's done... "
+
+  step "11. 📥  Test read access, in that same sandbox session"
+  note "Replace <ssh-target> with the same box as before. This should succeed and print a hostname:"
+  echo
+  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" $BOT_USER@<ssh-target>:/etc/hostname /tmp/ && cat /tmp/hostname"
+  read -rp "Press Enter once that's succeeded... "
+
+  step "12. 🚫  Test that writing is blocked, in that same sandbox session"
+  note "This should be refused - if it succeeds instead, the forced command isn't restricting writes and needs fixing before this key is trusted:"
+  echo
+  echo "  echo test > /tmp/vinceworks-write-test.txt"
+  echo "  rsync -e \"ssh -i ~/.ssh/vinceworks-bot/$key_name\" /tmp/vinceworks-write-test.txt $BOT_USER@<ssh-target>:/tmp/"
+  read -rp "Press Enter once that's confirmed refused... "
 
   echo
   echo "$rule"

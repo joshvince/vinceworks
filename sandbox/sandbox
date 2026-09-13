@@ -361,19 +361,23 @@ cmd_ssh_grant() {
   grant_ssh_access "$project" "$target"
 }
 
+# Runs under "sh -s" rather than the sandbox user's login shell (zsh), whose
+# default NOMATCH option would turn the unmatched *.target glob below into a
+# hard error instead of letting the [ -e "$f" ] guard skip it.
 fetch_grants_tsv() {
-  ssh "$SSH_HOST" '
-    for f in ~/.ssh/vinceworks/*.target; do
-      [ -e "$f" ] || continue
-      key_name=$(basename "$f" .target)
-      project=$(sed -n "s/^project=//p" "$f")
-      target=$(sed -n "s/^target=//p" "$f")
-      hostname=$(sed -n "s/^hostname=//p" "$f")
-      port=$(sed -n "s/^port=//p" "$f")
-      user=$(sed -n "s/^user=//p" "$f")
-      printf "%s\t%s\t%s\t%s\t%s\t%s\n" "$key_name" "$project" "$target" "$hostname" "$port" "$user"
-    done
-  '
+  ssh "$SSH_HOST" "sh -s" <<'REMOTE'
+set -eu
+for f in "$HOME"/.ssh/vinceworks/*.target; do
+  [ -e "$f" ] || continue
+  key_name=$(basename "$f" .target)
+  project=$(sed -n "s/^project=//p" "$f")
+  target=$(sed -n "s/^target=//p" "$f")
+  hostname=$(sed -n "s/^hostname=//p" "$f")
+  port=$(sed -n "s/^port=//p" "$f")
+  user=$(sed -n "s/^user=//p" "$f")
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$key_name" "$project" "$target" "$hostname" "$port" "$user"
+done
+REMOTE
 }
 
 cmd_ssh_list() {

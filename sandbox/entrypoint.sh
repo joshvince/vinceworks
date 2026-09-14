@@ -19,6 +19,9 @@ for var in MISE_DATA_DIR MISE_YES MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS CLAUD
 done
 cp "$vinceworks/sandbox/tmux.conf" "$HOME/.tmux.conf"
 git config --global --unset-all credential.helper 2>/dev/null || true
+# The sandbox authenticates to GitHub over HTTPS via `gh` (see ai.sh), not SSH keys,
+# so rewrite SSH-style remotes to HTTPS rather than needing agent-forwarded keys.
+git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 echo "Installing AI tooling..."
 zsh "$vinceworks/ai.sh" >/dev/null

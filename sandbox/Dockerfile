@@ -39,12 +39,14 @@ COPY sshd_config /etc/ssh/sandbox_sshd_config
 USER $USERNAME
 WORKDIR /home/$USERNAME
 
+# Every process the entrypoint spawns inherits this PATH, including agent harnesses that
+# freeze it into their own shell. Shims go last so a mise node stays behind the system node Paseo and OpenCode run on.
 ENV HOME=/home/$USERNAME \
     CLAUDE_CONFIG_DIR=/home/$USERNAME/.claude \
     MISE_DATA_DIR=/home/$USERNAME/.local/share/mise \
     MISE_YES=1 \
     MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS=ruby,node,python,go \
-    PATH=/home/$USERNAME/.local/bin:$PATH \
+    PATH=/home/$USERNAME/.local/bin:$PATH:/home/$USERNAME/.local/share/mise/shims \
     BINDING=0.0.0.0 \
     TERM=xterm-256color \
     SHELL=/bin/zsh

@@ -17,6 +17,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && mkdir -p /run/sshd \
     && rm -rf /var/lib/apt/lists/*
 
+# Ubuntu's default pg_hba.conf authenticates local connections with peer, so a
+# Rails app whose database.yml names `postgres` cannot connect as the josh user.
+# The sandbox is a single-user dev container reachable only over the host's
+# loopback, so local and loopback connections trust any role.
+RUN printf 'local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n' \
+      | tee /etc/postgresql/*/main/pg_hba.conf >/dev/null
+
 # Node 22 from NodeSource. The Paseo CLI and OpenCode are npm globals on a system path because the home is bind-mounted at runtime and would hide anything installed there. Claude Code is not baked in: ai.sh runs its native installer into the persistent home on first start, where it self-updates.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \

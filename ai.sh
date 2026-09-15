@@ -6,9 +6,9 @@
 #   - translate-and-copy them into ~/.claude/agents/ (Claude Code uses a different
 #     frontmatter shape — `name` + `description`, no per-tool permission block)
 #
-# Skill directories in ./ai/skills use SKILL.md — same format for both providers
-# (OpenCode reads Claude-compatible skill paths natively), so we just symlink each
-# skill directory into both ~/.claude/skills/ and ~/.config/opencode/skills/.
+# Skill directories in ./ai/skills use SKILL.md — same format across providers,
+# so we just symlink each skill directory into ~/.claude/skills/,
+# ~/.config/opencode/skills/, and the harness-agnostic ~/.agents/skills/.
 #
 # Use --force to overwrite existing files / wrong-target symlinks.
 
@@ -169,6 +169,7 @@ done
 SKILLS_SOURCE="$VINCEWORKS_DIR/ai/skills"
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
 OPENCODE_SKILLS_DIR="$HOME/.config/opencode/skills"
+AGENTS_SKILLS_DIR="$HOME/.agents/skills"
 
 # Symlink a skill directory into a provider's skills dir. Same SKILL.md format
 # works for both providers, so no translation step is needed (unlike agents).
@@ -201,11 +202,12 @@ skill_dirs=("$SKILLS_SOURCE"/*(N/))
 if [[ ${#skill_dirs[@]} -eq 0 ]]; then
   print "\nNo skill directories found in $SKILLS_SOURCE — skipping skills."
 else
-  print "\nLinking skills into Claude Code and OpenCode..."
-  mkdir -p "$CLAUDE_SKILLS_DIR" "$OPENCODE_SKILLS_DIR"
+  print "\nLinking skills into Claude Code, OpenCode, and ~/.agents/skills..."
+  mkdir -p "$CLAUDE_SKILLS_DIR" "$OPENCODE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
   for skill_dir in "${skill_dirs[@]}"; do
     link_skill "$skill_dir" "$CLAUDE_SKILLS_DIR/${skill_dir:t}"
     link_skill "$skill_dir" "$OPENCODE_SKILLS_DIR/${skill_dir:t}"
+    link_skill "$skill_dir" "$AGENTS_SKILLS_DIR/${skill_dir:t}"
   done
 fi
 

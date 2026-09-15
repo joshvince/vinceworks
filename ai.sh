@@ -19,6 +19,8 @@ for arg in "$@"; do
   [[ "$arg" == "--force" ]] && FORCE=true
 done
 
+VINCEWORKS_DIR=$(dirname "$(realpath "$0")")
+
 # --- Tools ---
 
 print "\nChecking AI tools..."
@@ -37,9 +39,10 @@ else
   curl -fsSL https://opencode.ai/install | bash
 fi
 
+"$VINCEWORKS_DIR/pi.sh" "$@"
+
 # --- Agents ---
 
-VINCEWORKS_DIR=$(dirname "$(realpath "$0")")
 AGENTS_SOURCE="$VINCEWORKS_DIR/ai/agents"
 OPENCODE_AGENTS_DIR="$HOME/.config/opencode/agents"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"

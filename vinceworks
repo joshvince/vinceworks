@@ -12,6 +12,7 @@ usage: vinceworks <command> [args]
   vinceworks tmux                       attach to tmux inside the sandbox
   vinceworks update [args]              pick up dotfile and package changes on an existing machine
   vinceworks ai [args]                  install AI tools and sync agents/skills
+  vinceworks pi [args]                  install pi and write its global settings
   vinceworks dev-machine-setup          full setup for a fresh machine
 USAGE
   exit 1
@@ -27,6 +28,7 @@ case "$command" in
   tmux) exec ssh -t "${SANDBOX_SSH_HOST:-vinceworks-sandbox}" 'export TERM=xterm-256color; cd ~/projects && tmux new -A -s main' ;;
   update) exec "$VINCEWORKS_DIR/update.sh" "$@" ;;
   ai) exec "$VINCEWORKS_DIR/ai.sh" "$@" ;;
+  pi) exec "$VINCEWORKS_DIR/pi.sh" "$@" ;;
   dev-machine-setup) exec "$VINCEWORKS_DIR/dev-machine-setup.sh" "$@" ;;
   -h|--help|help) usage ;;
   *) usage ;;

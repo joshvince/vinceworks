@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# Installs pi, writes its global settings, installs extensions, and reports on provider logins.
+# Installs pi, applies shared settings, installs extensions, and reports on provider logins.
 #
 # Use --force to overwrite an existing settings file.
 
@@ -9,6 +9,8 @@ FORCE=false
 for arg in "$@"; do
   [[ "$arg" == "--force" ]] && FORCE=true
 done
+
+VINCEWORKS_DIR=$(dirname "$(realpath "$0")")
 
 # pi needs a Node new enough to have shipped after its minimum-supported release.
 node_new_enough() {
@@ -31,31 +33,19 @@ fi
 
 # --- pi settings ---
 
+PI_SETTINGS_SOURCE="$VINCEWORKS_DIR/ai/pi/settings.json"
 PI_SETTINGS_DIR="$HOME/.pi/agent"
 PI_SETTINGS_FILE="$PI_SETTINGS_DIR/settings.json"
 
-if [[ -f "$PI_SETTINGS_FILE" ]] && ! $FORCE; then
+if [[ ! -f "$PI_SETTINGS_SOURCE" ]]; then
+  print "\n  [error]   $PI_SETTINGS_SOURCE not found"
+  exit 1
+elif [[ -f "$PI_SETTINGS_FILE" ]] && ! $FORCE; then
   print "\n  [skip]    $PI_SETTINGS_FILE already exists (use --force)"
 else
   mkdir -p "$PI_SETTINGS_DIR"
-  cat > "$PI_SETTINGS_FILE" <<'JSON'
-{
-  "defaultProvider": "opencode-go",
-  "defaultModel": "deepseek-v4.1-flash",
-  "hideThinkingBlock": true,
-  "enabledModels": [
-    "opencode-go/deepseek-v4-flash",
-    "opencode-go/deepseek-v4.1-flash",
-    "opencode-go/deepseek-v4-flash-vision-exp",
-    "opencode-go/deepseek-v4-pro",
-    "opencode-go/qwen3.8-flash",
-    "opencode-go/qwen3.8-max",
-    "opencode-go/gpt-5.6-luna",
-    "opencode-go/muse-spark-1.3-contributor"
-  ]
-}
-JSON
-  print "\n  [written] $PI_SETTINGS_FILE"
+  cp "$PI_SETTINGS_SOURCE" "$PI_SETTINGS_FILE"
+  print "\n  [copied]  $PI_SETTINGS_FILE"
 fi
 
 # --- pi extensions ---
@@ -63,6 +53,9 @@ fi
 if command -v pi &>/dev/null; then
   print "\n  Installing rpiv-todo extension..."
   pi install npm:@juicesharp/rpiv-todo
+
+  print "  Installing pi-web-access extension..."
+  pi install npm:pi-web-access
 else
   print "\n  [skip]    pi not installed, skipping extensions"
 fi

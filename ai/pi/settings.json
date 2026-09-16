@@ -1,6 +1,6 @@
 {
   "lastChangelogVersion": "0.85.1",
-  "theme": "dark",
+  "theme": "tokyo-night",
   "hideThinkingBlock": true,
   "defaultProvider": "openai-codex",
   "defaultModel": "openai-codex/gpt-5.6-terra",
@@ -17,6 +17,12 @@
     "npm:@juicesharp/rpiv-todo",
     "npm:pi-web-access",
     "npm:pi-subagents"
+  ],
+  "extensions": [
+    "~/vinceworks/ai/pi/extensions/context-footer.ts"
+  ],
+  "themes": [
+    "~/vinceworks/ai/pi/themes"
   ],
   "subagents": {
     "agentOverrides": {

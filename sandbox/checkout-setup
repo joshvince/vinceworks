@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs inside the sandbox. The single entry point a worktree tool calls right
-# after creating a worktree: copies untracked secrets from the source
-# checkout, then allocates a PORT. Not Paseo-specific — reads no PASEO_* vars.
+# after creating a worktree: fast-forwards it to origin/main, copies untracked
+# secrets from the source checkout, then allocates a PORT. Reads no PASEO_* vars.
 # Reports every action on stdout, so a worktree tool's UI shows what it did.
 set -euo pipefail
 
@@ -13,6 +13,21 @@ if [[ -z "$source_checkout" ]]; then
   source_checkout=$(git -C "$worktree" worktree list --porcelain | sed -n "1s/^worktree //p")
   [[ -n "$source_checkout" && -d "$source_checkout" ]] \
     || { echo "checkout-setup: could not determine source checkout for $worktree" >&2; exit 1; }
+fi
+
+head_commit=$(git -C "$worktree" rev-parse HEAD)
+echo "checkout-setup: fetching origin/main"
+git -C "$worktree" fetch --quiet origin main
+main_commit=$(git -C "$worktree" rev-parse FETCH_HEAD)
+
+if git -C "$worktree" merge-base --is-ancestor "$main_commit" "$head_commit"; then
+  echo "  worktree already contains origin/main"
+elif git -C "$worktree" merge-base --is-ancestor "$head_commit" "$main_commit"; then
+  git -C "$worktree" merge --ff-only --quiet "$main_commit"
+  echo "  fast-forwarded from ${head_commit:0:7} to ${main_commit:0:7}"
+else
+  echo "checkout-setup: refusing to update: worktree has diverged from origin/main" >&2
+  exit 1
 fi
 
 if [[ "$worktree" -ef "$source_checkout" ]]; then

@@ -56,6 +56,9 @@ if command -v pi &>/dev/null; then
 
   print "  Installing pi-web-access extension..."
   pi install npm:pi-web-access
+
+  print "  Installing pi-subagents extension..."
+  pi install npm:pi-subagents
 else
   print "\n  [skip]    pi not installed, skipping extensions"
 fi

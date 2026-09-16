@@ -59,7 +59,7 @@ To achieve this, each of the projects I am working on has its own `paseo.json` a
 }
 ```
 
-`worktree.setup` runs whenever paseo creates a new git worktree. The `sandbox/checkout-setup` script in this repo copies over some gitignored env-related files that a typical app needs to run in development (for instance, the `.env` file) from the main checkout into the new worktree, never overwriting anything already there, and then calls `sandbox/alloc-port`. 
+`worktree.setup` runs whenever paseo creates a new git worktree. The `sandbox/checkout-setup` script fetches `origin/main` and safely fast-forwards the new branch before the agent starts. It refuses to proceed if the branch has diverged rather than discarding work. It then copies gitignored env-related files that a typical app needs to run in development (for instance, the `.env` file) from the main checkout into the new worktree, never overwriting anything already there, and calls `sandbox/alloc-port`.
 
 `alloc-port` picks a port within my specified range that is free according to both `ss -ltn` and every other checkout's `.env`, and writes it into the worktree's `.env` as `PORT`. It is safe to run more than once. A port that is already in range is left alone, so a running app never has its port moved. A port outside the range is replaced, and the replacement is logged. The `.env` files under `~/projects` and `~/.paseo/worktrees` are the record of which ports are taken. Deleting a worktree frees its port, and there is no separate state file that could fall out of sync.
 

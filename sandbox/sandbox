@@ -30,6 +30,7 @@ usage: vinceworks sandbox <command> [args]
   vinceworks sandbox ssh-grant <project> <target>          generate a scoped ssh key in the sandbox and grant <project> access to <target>
   vinceworks sandbox ssh-revoke <project> [target]         revoke <project>'s ssh access, to one <target> or every target it has
   vinceworks sandbox ssh-list                              list every project's current ssh grants
+  vinceworks sandbox sync-credential <VAR_NAME>            copy a var from this Mac's ~/.credentials into the sandbox's ~/.credentials
 USAGE
   exit 1
 }
@@ -589,6 +590,38 @@ cmd_push() {
   fi
 }
 
+cmd_sync_credential() {
+  local var=${1:?variable name required}
+  local creds_file="$HOME/.credentials"
+  [[ -f "$creds_file" ]] || { echo "  [error] $creds_file not found on this Mac" >&2; exit 1; }
+
+  local line
+  line=$(grep -m1 -E "^(export )?${var}=" "$creds_file") || true
+  [[ -n "$line" ]] || { echo "  [error] $var not found in $creds_file" >&2; exit 1; }
+
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$var") $(printf %q "$line")" <<'REMOTE'
+set -eu
+var=$1
+line=$2
+f="$HOME/.credentials"
+if [ ! -f "$f" ]; then
+  touch "$f"
+  chmod 600 "$f"
+fi
+if grep -qE "^(export )?${var}=" "$f"; then
+  tmp=$(mktemp)
+  awk -v var="$var" -v line="$line" '
+    $0 ~ "^(export )?" var "=" { print line; next }
+    { print }
+  ' "$f" > "$tmp"
+  mv "$tmp" "$f"
+else
+  printf '%s\n' "$line" >> "$f"
+fi
+REMOTE
+  echo "  [synced] $var -> $SSH_HOST:~/.credentials"
+}
+
 command=${1:-}
 [[ -n "$command" ]] || usage
 shift
@@ -600,6 +633,7 @@ case "$command" in
   ssh-grant) cmd_ssh_grant "$@" ;;
   ssh-revoke) cmd_ssh_revoke "$@" ;;
   ssh-list) cmd_ssh_list "$@" ;;
+  sync-credential) cmd_sync_credential "$@" ;;
   -h|--help|help) usage ;;
   *) usage ;;
 esac

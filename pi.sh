@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-# Installs pi and writes its global settings.
+# Installs pi, writes its global settings, installs extensions, and reports on provider logins.
 #
 # Use --force to overwrite an existing settings file.
 
@@ -42,6 +42,7 @@ else
 {
   "defaultProvider": "opencode-go",
   "defaultModel": "deepseek-v4.1-flash",
+  "hideThinkingBlock": true,
   "enabledModels": [
     "opencode-go/deepseek-v4-flash",
     "opencode-go/deepseek-v4.1-flash",
@@ -55,6 +56,26 @@ else
 }
 JSON
   print "\n  [written] $PI_SETTINGS_FILE"
+fi
+
+# --- pi extensions ---
+
+if command -v pi &>/dev/null; then
+  print "\n  Installing rpiv-todo extension..."
+  pi install npm:@juicesharp/rpiv-todo
+else
+  print "\n  [skip]    pi not installed, skipping extensions"
+fi
+
+# --- pi providers ---
+
+# openai-codex is OAuth-only (ChatGPT Plus/Pro): the one-time login happens by hand in pi's TUI.
+if ! command -v pi &>/dev/null; then
+  print "\n  [skip]    pi not installed, skipping provider logins"
+elif pi auth check --provider openai-codex --no-refresh &>/dev/null; then
+  print "\n  [skip]    openai-codex already logged in"
+else
+  print "\n  [warn]    openai-codex not logged in: run 'pi', then '/login openai-codex'"
 fi
 
 print "\nDone. Use --force to replace existing settings."

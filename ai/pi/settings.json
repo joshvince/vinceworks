@@ -3,7 +3,7 @@
   "theme": "tokyo-night",
   "hideThinkingBlock": true,
   "defaultProvider": "openai-codex",
-  "defaultModel": "openai-codex/gpt-5.6-terra",
+  "defaultModel": "gpt-5.6-terra",
   "enabledModels": [
     "openai-codex/gpt-5.6-luna",
     "openai-codex/gpt-5.6-terra",

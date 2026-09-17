@@ -14,7 +14,8 @@ PublishPort=2222:2222
 PublishPort=4100-4199:4100-4199
 Environment=RAILS_DEVELOPMENT_HOSTS=192.168.1.200,vince-archive
 Environment=VINCEWORKS_CONTEXT=sandbox
-PodmanArgs=--memory 10g --cpus 3
+# Chromium under Playwright needs more than podman's default 64M of /dev/shm.
+PodmanArgs=--memory 10g --cpus 3 --shm-size 512m
 
 [Service]
 Restart=always

@@ -32,6 +32,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && chown -R "$UID:$GID" /usr/lib/node_modules/@getpaseo \
     && rm -rf /var/lib/apt/lists/*
 
+# Playwright with Chromium so agents can screenshot the apps they build. Browsers
+# go to /opt because the runtime bind mount over the home directory hides the
+# default ~/.cache/ms-playwright location. --with-deps pulls in the ~30 apt
+# libraries headless Chromium links against.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+RUN npm install -g playwright \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/ms-playwright \
+    && rm -rf /var/lib/apt/lists/*
+
 # ubuntu:24.04 ships an `ubuntu` user at uid 1000. Remove it so the container
 # user can take the same uid as josh on the host and bind mounts keep ownership.
 RUN userdel -r ubuntu 2>/dev/null || true \

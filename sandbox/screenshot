@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. Screenshots a URL with headless Chromium so an agent
+# can look at the app it just changed.
+set -euo pipefail
+
+usage() {
+  cat <<USAGE
+usage: screenshot <url> [output.png]
+
+  WIDTH=1280      viewport width
+  HEIGHT=800      viewport height
+  FULL_PAGE=1     capture the whole scrollable page, not just the viewport
+  WAIT=load       playwright waitUntil state: load, domcontentloaded, networkidle
+  NO_SANDBOX=1    launch Chromium with --no-sandbox
+USAGE
+  exit 1
+}
+
+url=${1:-}
+[[ -n "$url" ]] || usage
+[[ "$url" == http://* || "$url" == https://* ]] || url="http://$url"
+out=${2:-screenshot.png}
+
+NODE_PATH="$(npm root -g)" node - \
+  "$url" "$out" "${WIDTH:-1280}" "${HEIGHT:-800}" "${FULL_PAGE:-1}" "${WAIT:-load}" <<'JS'
+const { chromium } = require('playwright');
+const [url, out, width, height, fullPage, waitUntil] = process.argv.slice(2);
+
+// Chromium keeps its own sandbox here: rootless podman on the box hands out the
+// nested user namespaces it needs. NO_SANDBOX=1 turns it off if that ever stops
+// holding, since the container is already the isolation boundary.
+const args = process.env.NO_SANDBOX === '1' ? ['--no-sandbox'] : [];
+
+(async () => {
+  const browser = await chromium.launch({ args });
+  const page = await browser.newPage({
+    viewport: { width: Number(width), height: Number(height) },
+  });
+  await page.goto(url, { waitUntil, timeout: 30000 });
+  await page.screenshot({ path: out, fullPage: fullPage === '1' });
+  await browser.close();
+  console.log(out);
+})().catch((err) => {
+  console.error(`screenshot: ${err.message}`);
+  process.exit(1);
+});
+JS

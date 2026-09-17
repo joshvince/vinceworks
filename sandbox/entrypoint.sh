@@ -14,7 +14,7 @@ done
 cp "$vinceworks/sandbox/zshrc" "$HOME/.zshrc"
 cp "$vinceworks/sandbox/zshenv" "$HOME/.zshenv"
 # sshd starts sessions with a clean environment, so the image and unit env has to be re-exported for ssh and tmux shells.
-for var in MISE_DATA_DIR MISE_YES MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS CLAUDE_CONFIG_DIR BINDING RAILS_DEVELOPMENT_HOSTS VINCEWORKS_CONTEXT TZ LANG; do
+for var in MISE_DATA_DIR MISE_YES MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS CLAUDE_CONFIG_DIR PLAYWRIGHT_BROWSERS_PATH BINDING RAILS_DEVELOPMENT_HOSTS VINCEWORKS_CONTEXT TZ LANG; do
   [[ -n "${!var:-}" ]] && printf 'export %s=%q\n' "$var" "${!var}" >> "$HOME/.zshenv"
 done
 # ~/.credentials lives in the bind-mounted persistent home, unlike .zshenv
@@ -28,6 +28,11 @@ git config --global url."https://github.com/".insteadOf "git@github.com:"
 
 echo "Installing AI tooling..."
 zsh "$vinceworks/ai.sh" >/dev/null
+
+# ~/.local/bin is on PATH for every shell, so an agent finds `screenshot` without
+# knowing where the repo is mounted.
+mkdir -p "$HOME/.local/bin"
+ln -sf "$vinceworks/sandbox/screenshot" "$HOME/.local/bin/screenshot"
 
 echo "Preparing sshd..."
 mkdir -p "$HOME/projects" "$sshd_dir"

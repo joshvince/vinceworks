@@ -43,6 +43,21 @@ Both show a confirmation block (target, resolved hostname/port/user, key fingerp
 
 **Carwow projects never get a grant, full stop.** `ssh-grant` and `push --ssh` hard-refuse, case-insensitively, if the project name or its git origin URL contains "carwow": there's no flag or override to bypass this.
 
+## Screenshots
+
+Agents can see the apps they build. The image ships Playwright with headless Chromium, and `screenshot <url> [output.png]` wraps it:
+
+```
+screenshot localhost:4123 before.png
+WIDTH=390 HEIGHT=844 screenshot localhost:4123 mobile.png
+```
+
+The agent then reads the PNG back with its own image-capable file tool, so a change can be checked against how it actually renders rather than against the markup.
+
+Chromium runs with its own sandbox intact. Rootless podman on the box does hand out the nested user namespaces it needs, so none of the usual `--no-sandbox` advice applies. `screenshot` takes `NO_SANDBOX=1` if that ever stops being true, and a script written by hand can pass `--no-sandbox` for the same reason; the container is already the isolation boundary. The unit also gives the container 512M of `/dev/shm` instead of podman's default 64M, which is the size Chromium is unhappy below on heavy pages.
+
+Browsers live at `/opt/ms-playwright`, not the default `~/.cache/ms-playwright`, because the runtime bind mount over the home directory would hide anything the build put there. `PLAYWRIGHT_BROWSERS_PATH` points at it for every shell, so a project that installs its own `playwright` npm package reuses the baked Chromium instead of downloading a second copy. A project pinned to a Playwright version far from the global one will want its own `playwright install chromium`, which lands in the same directory alongside the existing build.
+
 ## Paseo
 
 [Paseo](https://paseo.sh/docs) is a very cool open source project that lets you easily run multiple git-worktree-based agent sessions. It has a nice UX and the killer app for me is the ability to use multiple hosts. It is the bridge between a machine (like my phone) and this podman container.  

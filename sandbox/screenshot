@@ -13,11 +13,27 @@ usage: screenshot <url> [output.png]
   WAIT=load       playwright waitUntil state: load, domcontentloaded, networkidle
   NO_SANDBOX=1    launch Chromium with --no-sandbox
 USAGE
-  exit 1
 }
 
-url=${1:-}
-[[ -n "$url" ]] || usage
+# Agents reach for --help before reading anything. Without this the flag was
+# treated as a hostname and came back as a Chromium DNS failure.
+case ${1:-} in
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  "")
+    usage >&2
+    exit 1
+    ;;
+  -*)
+    printf 'screenshot: unknown option %s\n\n' "$1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
+
+url=$1
 [[ "$url" == http://* || "$url" == https://* ]] || url="http://$url"
 out=${2:-screenshot.png}
 

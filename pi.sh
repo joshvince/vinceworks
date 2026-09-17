@@ -65,13 +65,22 @@ fi
 
 # --- pi providers ---
 
-# openai-codex is OAuth-only (ChatGPT Plus/Pro): the one-time login happens by hand in pi's TUI.
 if ! command -v pi &>/dev/null; then
   print "\n  [skip]    pi not installed, skipping provider logins"
-elif pi auth check --provider openai-codex --no-refresh &>/dev/null; then
-  print "\n  [skip]    openai-codex already logged in"
 else
-  print "\n  [warn]    openai-codex not logged in: run 'pi', then '/login openai-codex'"
+  # openai-codex is OAuth-only (ChatGPT Plus/Pro): the one-time login happens by hand in pi's TUI.
+  if pi auth check --provider openai-codex --no-refresh &>/dev/null; then
+    print "\n  [skip]    openai-codex already logged in"
+  else
+    print "\n  [warn]    openai-codex not logged in: run 'pi', then '/login openai-codex'"
+  fi
+
+  # opencode and opencode-go take their key from the environment, not pi's auth store.
+  if [[ -n "${OPENCODE_API_KEY:-}" ]]; then
+    print "\n  [skip]    OPENCODE_API_KEY set (opencode, opencode-go)"
+  else
+    print "\n  [warn]    OPENCODE_API_KEY not set: opencode and opencode-go models stay hidden"
+  fi
 fi
 
 print "\nDone. Use --force to replace existing settings."

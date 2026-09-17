@@ -18,8 +18,14 @@ for var in MISE_DATA_DIR MISE_YES MISE_IDIOMATIC_VERSION_FILE_ENABLE_TOOLS CLAUD
   [[ -n "${!var:-}" ]] && printf 'export %s=%q\n' "$var" "${!var}" >> "$HOME/.zshenv"
 done
 # ~/.credentials lives in the bind-mounted persistent home, unlike .zshenv
-# itself which is overwritten from the repo on every container start.
-[[ -f "$HOME/.credentials" ]] && printf 'source "$HOME/.credentials"\n' >> "$HOME/.zshenv"
+# itself which is overwritten from the repo on every container start. Shells read
+# it via that file; this script and the daemon it starts need it sourced here.
+if [[ -f "$HOME/.credentials" ]]; then
+  printf 'source "$HOME/.credentials"\n' >> "$HOME/.zshenv"
+  set -a
+  source "$HOME/.credentials"
+  set +a
+fi
 cp "$vinceworks/sandbox/tmux.conf" "$HOME/.tmux.conf"
 git config --global --unset-all credential.helper 2>/dev/null || true
 # The sandbox authenticates to GitHub over HTTPS via `gh` (see ai.sh), not SSH keys,

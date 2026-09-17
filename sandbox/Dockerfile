@@ -28,7 +28,8 @@ RUN printf 'local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all :
 # Node 22 from NodeSource. The Paseo CLI and OpenCode are npm globals on a system path because the home is bind-mounted at runtime and would hide anything installed there. Claude Code is not baked in: ai.sh runs its native installer into the persistent home on first start, where it self-updates.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g @getpaseo/cli@0.7.2 opencode-ai \
+    && npm install -g @getpaseo/cli@0.8.0 opencode-ai \
+    && chown -R "$UID:$GID" /usr/lib/node_modules/@getpaseo \
     && rm -rf /var/lib/apt/lists/*
 
 # ubuntu:24.04 ships an `ubuntu` user at uid 1000. Remove it so the container

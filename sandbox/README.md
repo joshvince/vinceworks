@@ -24,40 +24,6 @@ I put together a simple command line interface to manage this, so I can run thin
 
 There are also fairly simple scripts to handle things like new worktrees being instantiated, and I am using `tmux` to be able to attach and detach into things without needing Paseo as the bridge.
 
-### Agent SSH access to production
-
-Agents in the sandbox start out unable to reach any of my production servers, so ordinary tasks like `kamal app logs` fail. `vinceworks sandbox ssh-grant <project> <target>` fixes that for one project and one server at a time, where `<target>` is any ssh target that already works from the Mac: an alias from `~/.ssh/config`, or a bare hostname/IP.
-
-**My own Mac keys are never read, copied, moved or touched.** Instead, `ssh-grant` generates a brand new ed25519 keypair inside the sandbox, scoped to that one project and target, and only the public half ever leaves the sandbox: it gets appended to the target's `~/.ssh/authorized_keys`, tagged with a comment like `vinceworks:myapp:myapp-prod` so it can be found again later. The sandbox also gets a matching `Host <target>` block in its own `~/.ssh/config`, so an agent can `ssh <target>` using the exact same alias I'd type on the Mac. If the project's `config/deploy.yml` points `ssh.keys` at a path under `~/.ssh/`, that path is symlinked to the new key in the sandbox too, so `kamal` commands work there unmodified.
-
-Two ways to grant access:
-
-- `vinceworks sandbox push <url|name> [paths...] --ssh <target>` (grant access as part of pushing a project to the sandbox for the first time)
-- `vinceworks sandbox ssh-grant <project> <target>` (grant access to a project that's already in the sandbox, or add a second target to one that already has access somewhere)
-
-Both show a confirmation block (target, resolved hostname/port/user, key fingerprint) before appending anything to the target machine, and default to "no". `ssh-grant` also turns on `LogLevel VERBOSE` in the target's sshd config (skipped with a warning if the box doesn't use `sshd_config.d`), so `auth.log` can tell the agent's key apart from mine.
-
-`vinceworks sandbox ssh-revoke <project> [target]` undoes a grant: it strips the tagged line from the target's `authorized_keys`, then deletes the key, its marker, its `Host` block, and its kamal symlink (only if that symlink still points at the key being removed) from the sandbox. Leave off `[target]` to revoke every grant a project has, after one confirmation listing them all. The sshd audit logging config is left in place on revoke, since other grants on the same box may still depend on it.
-
-`vinceworks sandbox ssh-list` shows every project's current grants: target, hostname, remote user and key fingerprint.
-
-**Carwow projects never get a grant, full stop.** `ssh-grant` and `push --ssh` hard-refuse, case-insensitively, if the project name or its git origin URL contains "carwow": there's no flag or override to bypass this.
-
-## Screenshots
-
-Agents can see the apps they build. The image ships Playwright with headless Chromium, and `screenshot <url> [output.png]` wraps it:
-
-```
-screenshot localhost:4123 before.png
-WIDTH=390 HEIGHT=844 screenshot localhost:4123 mobile.png
-```
-
-The agent then reads the PNG back with its own image-capable file tool, so a change can be checked against how it actually renders rather than against the markup.
-
-Chromium runs with its own sandbox intact. Rootless podman on the box does hand out the nested user namespaces it needs, so none of the usual `--no-sandbox` advice applies. `screenshot` takes `NO_SANDBOX=1` if that ever stops being true, and a script written by hand can pass `--no-sandbox` for the same reason; the container is already the isolation boundary. The unit also gives the container 512M of `/dev/shm` instead of podman's default 64M, which is the size Chromium is unhappy below on heavy pages.
-
-Browsers live at `/opt/ms-playwright`, not the default `~/.cache/ms-playwright`, because the runtime bind mount over the home directory would hide anything the build put there. `PLAYWRIGHT_BROWSERS_PATH` points at it for every shell, so a project that installs its own `playwright` npm package reuses the baked Chromium instead of downloading a second copy. A project pinned to a Playwright version far from the global one will want its own `playwright install chromium`, which lands in the same directory alongside the existing build.
-
 ## Paseo
 
 [Paseo](https://paseo.sh/docs) is a very cool open source project that lets you easily run multiple git-worktree-based agent sessions. It has a nice UX and the killer app for me is the ability to use multiple hosts. It is the bridge between a machine (like my phone) and this podman container.  

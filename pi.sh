@@ -22,7 +22,9 @@ node_new_enough() {
 
 print "\nChecking pi..."
 
+PI_ALREADY_INSTALLED=false
 if command -v pi &>/dev/null; then
+  PI_ALREADY_INSTALLED=true
   print "  [skip]    pi already installed"
 elif ! node_new_enough "22.19.0"; then
   print "  [skip]    pi requires Node >= 22.19.0 (found $(node -v 2>/dev/null || echo "none")), skipping"
@@ -51,6 +53,11 @@ fi
 # --- pi extensions ---
 
 if command -v pi &>/dev/null; then
+  if $PI_ALREADY_INSTALLED; then
+    print "\n  Updating pi and its extensions..."
+    pi update --extensions
+  fi
+
   print "\n  Installing rpiv-todo extension..."
   pi install npm:@juicesharp/rpiv-todo
 

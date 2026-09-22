@@ -3,11 +3,11 @@
   "theme": "tokyo-night",
   "hideThinkingBlock": true,
   "defaultProvider": "openai-codex",
-  "defaultModel": "gpt-5.6-terra",
+  "defaultModel": "gpt-6-luna",
   "enabledModels": [
-    "openai-codex/gpt-5.6-luna",
+    "openai-codex/gpt-6-luna",
     "openai-codex/gpt-5.6-terra",
-    "openai-codex/gpt-5.6-sol",
+    "openai-codex/gpt-6-sol",
     "openai-codex/gpt-6-astra",
     "opencode-go/deepseek-v4.1-flash",
     "opencode-go/deepseek-v4-flash-vision-exp",
@@ -25,33 +25,24 @@
     "~/vinceworks/ai/pi/themes"
   ],
   "subagents": {
-    "agentOverrides": {
-      "scout": { "thinking": "low" },
-      "delegate": { "thinking": "low" },
-      "researcher": { "thinking": "medium" },
-      "worker": { "thinking": "high" },
-      "reviewer": { "thinking": "high" },
-      "evidence-auditor": { "thinking": "high" },
-      "oracle": { "thinking": "high" }
-    },
     "agentOverridesByProvider": {
       "openai-codex": {
-        "scout": { "model": "openai-codex/gpt-5.6-luna" },
-        "delegate": { "model": "openai-codex/gpt-5.6-luna" },
-        "researcher": { "model": "openai-codex/gpt-5.6-luna" },
-        "worker": { "model": "openai-codex/gpt-5.6-terra" },
-        "reviewer": { "model": "openai-codex/gpt-5.6-terra" },
-        "evidence-auditor": { "model": "openai-codex/gpt-5.6-terra" },
-        "oracle": { "model": "openai-codex/gpt-5.6-sol" }
+        "scout": { "model": "openai-codex/gpt-6-luna", "thinking": "medium" },
+        "delegate": { "model": "openai-codex/gpt-6-luna", "thinking": "medium" },
+        "researcher": { "model": "openai-codex/gpt-6-luna", "thinking": "high" },
+        "worker": { "model": "openai-codex/gpt-6-luna", "thinking": "max" },
+        "reviewer": { "model": "openai-codex/gpt-6-sol", "thinking": "xhigh" },
+        "evidence-auditor": { "model": "openai-codex/gpt-6-sol", "thinking": "xhigh" },
+        "oracle": { "model": "openai-codex/gpt-6-sol", "thinking": "max" }
       },
       "opencode-go": {
-        "scout": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "delegate": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "researcher": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "worker": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "reviewer": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "evidence-auditor": { "model": "opencode-go/deepseek-v4.1-flash" },
-        "oracle": { "model": "opencode-go/deepseek-v4-pro" }
+        "scout": { "model": "opencode-go/deepseek-v4.1-flash", "thinking": "low" },
+        "delegate": { "model": "opencode-go/deepseek-v4.1-flash", "thinking": "low" },
+        "researcher": { "model": "opencode-go/deepseek-v4.1-flash", "thinking": "medium" },
+        "worker": { "model": "opencode-go/deepseek-v4.1-flash", "thinking": "high" },
+        "reviewer": { "model": "opencode-go/deepseek-v4-pro", "thinking": "high" },
+        "evidence-auditor": { "model": "opencode-go/deepseek-v4.1-flash", "thinking": "high" },
+        "oracle": { "model": "opencode-go/deepseek-v4-pro", "thinking": "xhigh" }
       }
     }
   }

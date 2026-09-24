@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Runs inside the sandbox. Assigns a PORT in the published range (4100-4199)
-# to a checkout or worktree's .env, or confirms its existing one still holds.
-# Idempotent by design so re-running setup never moves a running app's port.
+# Runs in the sandbox and on the Mac. Assigns a PORT in the published range
+# (4100-4199) to a checkout or worktree's .env, or confirms its existing one
+# still holds. Idempotent, so re-running setup never moves a running app's port.
 set -euo pipefail
 
 dir=${1:?usage: alloc-port <dir>}
@@ -9,7 +9,8 @@ dir=${1:?usage: alloc-port <dir>}
 
 LOCK=/tmp/vinceworks-alloc-port.lock
 exec 9>"$LOCK"
-flock -x 9                               # serializes concurrent worktree creation
+# Serializes concurrent worktree creation. flock is Linux; macOS has lockf.
+if command -v flock >/dev/null; then flock -x 9; else lockf 9; fi
 
 env_file="$dir/.env"
 
@@ -22,7 +23,11 @@ claimed=$(
   done < <(find "$HOME/projects" "$HOME/.paseo/worktrees" -maxdepth 4 -name .env 2>/dev/null)
 )
 
-listening=$(ss -ltnH 2>/dev/null | awk '{ n = split($4, a, ":"); print a[n] }')
+if command -v ss >/dev/null; then
+  listening=$(ss -ltnH 2>/dev/null | awk '{ n = split($4, a, ":"); print a[n] }')
+else                                     # macOS: netstat writes addresses as host.port
+  listening=$(netstat -anp tcp | awk '$6 == "LISTEN" { n = split($4, a, "."); print a[n] }')
+fi
 
 existing=""
 [[ -f "$env_file" ]] && existing=$(sed -n 's/^PORT=//p' "$env_file" | head -1)

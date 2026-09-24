@@ -41,6 +41,7 @@ Sets up AI tooling and syncs agents and skills. Installs Claude Code and OpenCod
 ```sh
 vinceworks:ai
 vinceworks:ai --force   # replace existing agents/skills or wrong-target symlinks
+vinceworks:ai --update  # update installed tools only; skip setup and syncing
 ```
 
 To add a new shared agent, drop a `.md` file into `ai/agents/` and re-run `vinceworks:ai`.

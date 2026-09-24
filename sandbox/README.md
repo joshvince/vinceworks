@@ -18,6 +18,10 @@ I want to go further into fully [automatic programming](https://antirez.com/news
 
 It's not **safe** as such, but it is a lot safer than doing this stuff on my own laptop where I keep most of my digital life.
 
+## Updating AI tools
+
+Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Claude Code, OpenCode, and Paseo. Missing tools are skipped. OpenCode and Paseo are system npm packages in the container, so this uses `sudo` for those two. Restart the sandbox afterward to run the updated Paseo daemon. Image rebuilds restore the versions baked into the image; run the update again after a rebuild if needed.
+
 ## `vinceworks` cli
 
 I put together a simple command line interface to manage this, so I can run things like `vinceworks sandbox push` to move a project to the sandbox, or `vinceworks sandbox ps` to see what is currently running and how to access any web servers on the box. 

@@ -11,15 +11,67 @@
 # ~/.config/opencode/skills/, and the harness-agnostic ~/.agents/skills/.
 #
 # Use --force to overwrite existing files / wrong-target symlinks.
+# Use --update to update installed tools without installing missing ones or syncing files.
 
 set -euo pipefail
 
 FORCE=false
+UPDATE=false
 for arg in "$@"; do
-  [[ "$arg" == "--force" ]] && FORCE=true
+  case "$arg" in
+    --force) FORCE=true ;;
+    --update) UPDATE=true ;;
+  esac
 done
 
 VINCEWORKS_DIR=$(dirname "$(realpath "$0")")
+
+if $UPDATE; then
+  print "\nUpdating installed AI tools..."
+
+  if command -v pi &>/dev/null; then
+    print "  Updating pi and its extensions..."
+    pi update --extensions
+  else
+    print "  [skip]    pi not installed"
+  fi
+
+  if command -v claude &>/dev/null; then
+    print "  Updating Claude Code..."
+    claude update
+  else
+    print "  [skip]    Claude Code not installed"
+  fi
+
+  if command -v opencode &>/dev/null; then
+    print "  Updating OpenCode..."
+    if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
+      sudo npm install -g opencode-ai@latest
+    else
+      opencode upgrade
+    fi
+  else
+    print "  [skip]    OpenCode not installed"
+  fi
+
+  if command -v paseo &>/dev/null; then
+    print "  Updating Paseo..."
+    if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
+      sudo npm install -g @getpaseo/cli@latest
+    else
+      npm install -g @getpaseo/cli@latest
+    fi
+  else
+    print "  [skip]    Paseo not installed"
+  fi
+
+  if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]] && command -v paseo &>/dev/null; then
+    print "\nDone. Restart the sandbox to run the new Paseo daemon."
+  else
+    print "\nDone."
+  fi
+  exit 0
+fi
 
 # --- Tools ---
 

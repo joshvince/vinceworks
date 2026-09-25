@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs inside the sandbox. The single entry point a worktree tool calls right
+# Runs in the sandbox and on the Mac. The single entry point a worktree tool calls
 # after creating a worktree: fast-forwards it to origin/main, copies untracked
 # secrets from the source checkout, then allocates a PORT. Reads no PASEO_* vars.
 # Reports every action on stdout, so a worktree tool's UI shows what it did.

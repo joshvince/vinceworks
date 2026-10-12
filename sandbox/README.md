@@ -20,7 +20,7 @@ It's not **safe** as such, but it is a lot safer than doing this stuff on my own
 
 ## Updating AI tools
 
-Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Claude Code, OpenCode, and Paseo. Missing tools are skipped. OpenCode and Paseo are system npm packages in the container, so this uses `sudo` for those two. Restart the sandbox afterward to run the updated Paseo daemon. Image rebuilds restore the versions baked into the image; run the update again after a rebuild if needed.
+Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Claude Code, OpenCode, and Paseo. Missing tools are skipped. Paseo lives under `~/.local` in the persistent home, so its update survives restarts and image rebuilds; restart the sandbox afterward to run the new daemon. If a release breaks the daemon, remove `~/.local/bin/paseo` and `~/.local/lib/node_modules/@getpaseo` (under `~/vinceworks-sandbox` on the box) and restart: the copy baked into the image takes over. OpenCode is a system npm package in the container, so its update uses `sudo` and lasts until the next restart, when the image's version returns.
 
 ## `vinceworks` cli
 

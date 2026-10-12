@@ -76,4 +76,5 @@ echo "sandbox: ready"
 
 # The pid file survives in the bind-mounted home, and a stale one makes the daemon refuse to start if a new process has that pid.
 rm -f "$HOME/.paseo/paseo.pid"
-exec paseo daemon start --foreground --listen 127.0.0.1:6767 --home "$HOME/.paseo"
+# PASEO_LISTEN takes precedence over the daemon.listen in config.json, so the daemon always binds loopback.
+exec env PASEO_LISTEN=127.0.0.1:6767 paseo daemon run --home "$HOME/.paseo"

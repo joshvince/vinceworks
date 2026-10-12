@@ -57,7 +57,7 @@ if $UPDATE; then
   if command -v paseo &>/dev/null; then
     print "  Updating Paseo..."
     if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
-      sudo npm install -g @getpaseo/cli@latest
+      npm install -g --prefix "$HOME/.local" @getpaseo/cli@latest
     else
       npm install -g @getpaseo/cli@latest
     fi
@@ -89,6 +89,17 @@ if command -v opencode &>/dev/null; then
 else
   print "  Installing OpenCode..."
   curl -fsSL https://opencode.ai/install | bash
+fi
+
+if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
+  if [[ -x "$HOME/.local/bin/paseo" ]]; then
+    print "  [skip]    Paseo already installed"
+  else
+    print "  Installing Paseo into ~/.local..."
+    if ! npm install -g --prefix "$HOME/.local" @getpaseo/cli@latest; then
+      print -u2 "  [warn]    Paseo install failed, so the daemon starts from the copy baked into the image"
+    fi
+  fi
 fi
 
 "$VINCEWORKS_DIR/pi.sh" "$@"

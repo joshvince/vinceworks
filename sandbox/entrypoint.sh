@@ -26,6 +26,22 @@ if [[ -f "$HOME/.credentials" ]]; then
   source "$HOME/.credentials"
   set +a
 fi
+# Build configuration goes in cargo's own config file rather than the environment. sshd
+# starts sessions clean, so an environment variable would have to be re-exported into
+# .zshenv by hand like the rest, and an agent that reaches cargo without going through zsh
+# would miss it entirely. A file cargo always reads cannot be bypassed that way.
+mkdir -p "$HOME/.cargo"
+cp "$vinceworks/sandbox/cargo-config.toml" "$HOME/.cargo/config.toml"
+# A wrapper path is a hard dependency for every cargo command in the container, so set it
+# only when the binary is really there: a missing cache should cost a slow build, not a
+# broken one.
+if command -v sccache >/dev/null 2>&1; then
+  sed -i 's|^#rustc-wrapper|rustc-wrapper|' "$HOME/.cargo/config.toml"
+else
+  echo "sandbox: no sccache, building without the shared compile cache" >&2
+fi
+command -v cargo >/dev/null 2>&1 ||
+  echo "sandbox: no cargo on PATH, the Rust toolchain is expected in the persistent home" >&2
 cp "$vinceworks/sandbox/tmux.conf" "$HOME/.tmux.conf"
 git config --global --unset-all credential.helper 2>/dev/null || true
 # The sandbox authenticates to GitHub over HTTPS via `gh` (see ai.sh), not SSH keys,
@@ -39,6 +55,10 @@ zsh "$vinceworks/ai.sh" >/dev/null
 # knowing where the repo is mounted.
 mkdir -p "$HOME/.local/bin"
 ln -sf "$vinceworks/sandbox/screenshot" "$HOME/.local/bin/screenshot"
+# So an agent can serialise its compiles without knowing where the repo is mounted. `reap` is
+# deliberately not linked here: it is an operator tool, and agents do not need a command that
+# deletes their own worktrees on their PATH.
+ln -sf "$vinceworks/sandbox/build-slot" "$HOME/.local/bin/build-slot"
 
 echo "Preparing sshd..."
 mkdir -p "$HOME/projects" "$sshd_dir"

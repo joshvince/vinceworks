@@ -15,6 +15,9 @@ PublishPort=4100-4199:4100-4199
 Environment=RAILS_DEVELOPMENT_HOSTS=192.168.1.200,vince-archive
 Environment=VINCEWORKS_CONTEXT=sandbox
 # Chromium under Playwright needs more than podman's default 64M of /dev/shm.
+# parallel-builds.md measures pinning to cores with --cpuset-cpus=0-2 instead of holding a
+# quota: the quota is what produces the container's CFS throttle counters, and a cpuset
+# removes that mechanism rather than managing it. Compare the two before changing this line.
 PodmanArgs=--memory 10g --cpus 3 --shm-size 512m
 
 [Service]

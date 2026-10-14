@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# Runs inside the sandbox. Reports build output and worktrees left behind by agents that
+# have finished or died. Nothing is deleted unless you pass --apply.
+#
+# The two kinds of leftover are not equally safe to remove:
+#
+#   target directories  reproducible, so age is enough on its own. The only cost of
+#                       deleting one is a rebuild.
+#   worktrees           may hold commits an agent never pushed, and an agent that died
+#                       mid-task leaves no other trace of that work. One is only
+#                       offered when its work is safely somewhere else (merged, or in
+#                       sync with its upstream) and nothing is running inside it.
+#
+# Only worktrees under ~/.paseo/worktrees are ever removed. A checkout under ~/projects is
+# reported but never deleted, even when git calls it a linked worktree rather than a main
+# checkout: that directory is the operator's, and reap's job is the agents' area. Its build
+# output is still fair game, because a rebuild restores that and nothing else is lost.
+#
+#   reap                    report what could be reclaimed
+#   reap --apply            delete it
+#   reap --days 3           change the age threshold for target directories (default 14)
+#   reap --targets          target directories only
+#   reap --worktrees        worktrees only
+set -euo pipefail
+shopt -s nullglob
+
+usage() {
+  cat <<USAGE
+usage: reap [--apply] [--days N] [--targets | --worktrees]
+
+  reports stale worktree build output and finished worktrees; deletes nothing
+  without --apply
+USAGE
+  exit 1
+}
+
+days=14
+apply=0
+scan_targets=1
+scan_worktrees=1
+
+# The "is anything working in there" check reads /proc, so this only runs inside the container.
+# Refusing is better than reporting a live worktree as free while the check is inert.
+[[ -d /proc/1 ]] || { echo "reap: must run inside the sandbox; there is no /proc to check for running processes" >&2; exit 1; }
+
+while (( $# )); do
+  case "$1" in
+    --apply)    apply=1 ;;
+    --days)     days=${2:?--days needs a number of days}; shift ;;
+    --targets)  scan_worktrees=0 ;;
+    --worktrees) scan_targets=0 ;;
+    -h|--help)  usage ;;
+    *)          echo "reap: unknown argument: $1" >&2; usage ;;
+  esac
+  shift
+done
+
+# Anything with its working directory inside a checkout is assumed to be working on it, so
+# that checkout is left alone entirely, including when an agent is merely sitting in the
+# directory between steps, which is the common case.
+live=()
+for proc in /proc/[0-9]*; do
+  cwd=$(readlink "$proc/cwd" 2>/dev/null || true)
+  [[ -n "$cwd" ]] && live+=("$cwd")
+done
+
+in_use() {
+  local want=$1 cwd
+  for cwd in "${live[@]}"; do
+    [[ "$cwd" == "$want" || "$cwd" == "$want"/* ]] && return 0
+  done
+  return 1
+}
+
+size_kb() { du -sk "$1" 2>/dev/null | cut -f1; }
+human() { awk -v k="$1" 'BEGIN{ if (k>=1048576) printf "%.1fG", k/1048576; else if (k>=1024) printf "%.0fM", k/1024; else printf "%dK", k }'; }
+tilde() { echo "${1/#$HOME/~}"; }
+older_than() { [[ -n $(find "$1" -maxdepth 0 -mtime +"$days" -print -quit 2>/dev/null) ]]; }
+
+main_checkouts() {
+  local co
+  for co in "$HOME/projects"/*/; do
+    [[ -d "$co" ]] && printf '%s\n' "${co%/}"
+  done
+}
+
+# Worktrees are asked of git rather than read out of the directory layout. There is more
+# than one layout in here: Paseo puts a worktree directly under a session, and the agent
+# harness nests its own deeper under <session>/worktrees/<agent>/. That depth has changed
+# before, and asking git also finds a worktree wherever it happens to live.
+worktrees() {
+  local co path
+  while IFS= read -r co; do
+    while IFS= read -r path; do
+      [[ -d "$path" ]] || continue
+      [[ -d "$path/.git" ]] && continue          # the main checkout, which is never removed
+      printf '%s\n' "$path"
+    done < <(git -C "$co" worktree list --porcelain 2>/dev/null |
+             awk '/^worktree /{ sub(/^worktree /, ""); print }')
+  done < <(main_checkouts)
+}
+
+# The branch a worktree would have been merged into.
+base_ref() {
+  local r
+  for r in main origin/main master origin/master; do
+    git -C "$1" rev-parse --quiet --verify "$r" >/dev/null 2>&1 && { echo "$r"; return; }
+  done
+}
+
+# Echoes a reason to keep it, or nothing when the work is safely somewhere else.
+worktree_reason_to_keep() {
+  local wt=$1 branch base head
+  [[ "$wt" == "$HOME/.paseo/worktrees"/* ]] || { echo "outside the agent worktree area"; return; }
+  git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "not a git worktree"; return; }
+  [[ -n $(git -C "$wt" status --porcelain 2>/dev/null) ]] && { echo "uncommitted changes"; return; }
+  branch=$(git -C "$wt" symbolic-ref --quiet --short HEAD 2>/dev/null || true)
+  head=${branch:-HEAD}
+  if git -C "$wt" rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    [[ $(git -C "$wt" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 1) == 0 ]] || { echo "unpushed commits"; return; }
+  fi
+  base=$(base_ref "$wt")
+  [[ -n "$base" ]] || { echo "no main branch to compare against"; return; }
+  git -C "$wt" merge-base --is-ancestor "$head" "$base" 2>/dev/null && return
+  echo "not merged into $base"
+}
+
+mapfile -t checkouts < <(main_checkouts)
+mapfile -t agents < <(worktrees | sort -u)
+
+targets=() worktrees=() kept=()
+reclaim=0
+
+if (( scan_targets )); then
+  for co in "${checkouts[@]}" "${agents[@]}"; do
+    in_use "$co" && continue
+    while IFS= read -r target; do
+      [[ -d "$target" ]] || continue
+      older_than "$target" || continue
+      kb=$(size_kb "$target"); reclaim=$(( reclaim + kb ))
+      targets+=("$(human "$kb")|$target")
+    done < <(find "$co" -maxdepth 3 -type d -name target -prune -print 2>/dev/null)
+  done
+fi
+
+if (( scan_worktrees )); then
+  for wt in "${agents[@]}"; do
+    in_use "$wt" && { kept+=("$wt|something is running inside it"); continue; }
+    reason=$(worktree_reason_to_keep "$wt")
+    if [[ -n "$reason" ]]; then
+      kept+=("$wt|$reason")
+      continue
+    fi
+    kb=$(size_kb "$wt"); reclaim=$(( reclaim + kb ))
+    worktrees+=("$(human "$kb")|$wt")
+  done
+fi
+
+if (( ${#targets[@]} )); then
+  echo "TARGET DIRECTORIES older than $days days"
+  for row in "${targets[@]}"; do printf '  %-7s %s\n' "${row%%|*}" "$(tilde "${row#*|}")"; done
+fi
+
+if (( ${#worktrees[@]} )); then
+  [[ ${#targets[@]} ]] && echo
+  echo "WORKTREES with their work pushed or merged"
+  for row in "${worktrees[@]}"; do printf '  %-7s %s\n' "${row%%|*}" "$(tilde "${row#*|}")"; done
+fi
+
+if (( ${#kept[@]} )); then
+  echo
+  echo "KEPT"
+  for row in "${kept[@]}"; do printf '  %-46s %s\n' "$(tilde "${row%%|*}")" "${row#*|}"; done
+fi
+
+empty_sessions=0
+for session in "$HOME/.paseo/worktrees"/*/; do
+  [[ -d "$session" ]] || continue
+  [[ -z $(find "$session" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null) ]] && empty_sessions=$(( empty_sessions + 1 ))
+done
+
+echo
+if (( ${#targets[@]} || ${#worktrees[@]} )); then
+  echo "reclaimable: $(human "$reclaim")"
+  if (( apply )); then
+    for row in "${targets[@]}"; do
+      path=${row#*|}
+      rm -rf -- "$path" && echo "  removed $(tilde "$path")"
+    done
+    for row in "${worktrees[@]}"; do
+      path=${row#*|}
+      # git's own removal, so the parent checkout's worktree bookkeeping stays in step.
+      # No --force: the checks above say it is clean, and if they are wrong for any reason
+      # this refuses rather than deleting something with work in it.
+      main_co=$(git -C "$path" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)
+      if [[ -n "$main_co" ]] && git -C "${main_co%/.git}" worktree remove "$path"; then
+        echo "  removed $(tilde "$path")"
+      else
+        echo "  FAILED to remove $(tilde "$path")" >&2
+      fi
+    done
+  else
+    echo "nothing deleted; re-run with --apply"
+  fi
+else
+  echo "nothing to reclaim"
+fi
+
+(( empty_sessions )) && echo "$empty_sessions empty session directories under ~/.paseo/worktrees (harmless, left alone)"
+exit 0

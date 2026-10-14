@@ -28,6 +28,28 @@ I put together a simple command line interface to manage this, so I can run thin
 
 There are also fairly simple scripts to handle things like new worktrees being instantiated, and I am using `tmux` to be able to attach and detach into things without needing Paseo as the bridge.
 
+`vinceworks sandbox reap` reports build output and worktrees left behind by agents that have finished or died. It deletes nothing without `--apply`, it never removes anything under `~/projects`, and it only offers a worktree from the agents' own area when its work is merged or pushed, so an agent that died mid-task cannot lose anything.
+
+## Rust builds
+
+Several agents building the same project on separate branches is the workload this box is worst at, and most of the work is duplicated rather than different: three worktrees of one application meant well over a thousand dependency artifacts compiled, where only a few hundred were distinct. [parallel-builds.md](parallel-builds.md) has the measurements and the reasoning; this is what is in place.
+
+**A compile cache shared by every worktree.** `sccache` is baked into the image and enabled through cargo's config, so a lane that has already built the dependency tree does not build it again. A miss just compiles normally. It can never cache the application's own crate, its link, or procedural macros, because those go through the system linker. The cache helps with dependencies, which is where the duplication was.
+
+**One config file rather than environment variables.** `sandbox/cargo-config.toml` is copied to `~/.cargo/config.toml` on every container start: the wrapper, the job count, the cache location, and a dev-profile override that stops dependencies compiling with full debug info. sshd starts sessions with a clean environment, so anything set as a variable would have to be re-exported into `.zshenv` by hand and would be missed entirely by an agent that reached cargo some other way. The debug override applies to dependencies only, so the application's own backtraces stay readable, and it lives here rather than in the application's manifest, so that repo is untouched.
+
+**A build gate.** `build-slot cargo test` runs a compile under one of a small number of slots, so several agents do not each assume they own every core:
+
+```sh
+build-slot cargo test           # waits for a slot when they are all busy
+build-slot cargo test --no-run  # build under the gate...
+cargo test                      # ...then run the suite ungated
+```
+
+Only compiles are gated. `cargo run`, `dev` and `watch` pass straight through, because they would hold a slot until the process exited. That is also why a test suite that boots a browser should be built under the gate and run outside it, as above. Set `VINCEWORKS_BUILD_SLOTS` to let more than one compile run at once. A gated build that shells out to another gated build passes through instead of deadlocking, and a build that has to wait says so immediately, because an agent whose tool times out sees a failed command rather than a waiting one and will retry into the back of the queue it was standing in.
+
+The Rust toolchain lives in the persistent home (`~/.cargo`, `~/.rustup`) and the image installs no compiler, deliberately, so there is only ever one to mismatch. Install it there on a fresh home; see the first-boot steps below.
+
 ## Paseo
 
 [Paseo](https://paseo.sh/docs) is a very cool open source project that lets you easily run multiple git-worktree-based agent sessions. It has a nice UX and the killer app for me is the ability to use multiple hosts. It is the bridge between a machine (like my phone) and this podman container.  
@@ -102,6 +124,7 @@ ssh://josh@vince-archive.<tailnet>:2222
 3. `gh auth setup-git` so git uses the token over HTTPS.
 4. `claude` to log in to Claude Code.
 5. Copy `~/.paseo/config.json` from the Mac into `~/.paseo/` in the sandbox.
+6. Install the Rust toolchain into the persistent home, with `rustup` into `~/.cargo`. The image ships no compiler on purpose, and the entrypoint says so at startup when there is nothing to build with.
 
 ## tmux
 

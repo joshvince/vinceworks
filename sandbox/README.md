@@ -26,6 +26,8 @@ Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Cla
 
 I put together a simple command line interface to manage this, so I can run things like `vinceworks sandbox push` to move a project to the sandbox, or `vinceworks sandbox ps` to see what is currently running and how to access any web servers on the box. 
 
+`push` only copies secrets when it first clones a repo. `vinceworks sandbox sync-env <project>` refreshes an existing checkout's `.env` from this Mac instead, keeping the port the sandbox allocated and printing the file it replaces to the terminal first, so the scrollback keeps a copy of what was there. Add `--worktrees` to include that project's Paseo worktrees, each keeping its own port.
+
 There are also fairly simple scripts to handle things like new worktrees being instantiated, and I am using `tmux` to be able to attach and detach into things without needing Paseo as the bridge.
 
 ## Paseo

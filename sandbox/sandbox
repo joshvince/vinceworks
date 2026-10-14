@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
-# Mac-side CLI for the sandbox container. up/rebuild/status are one SSH call
-# to sandbox/host/sandbox-host on the box. push clones a repo into the
-# sandbox if needed and copies its secret files in. ssh-grant/ssh-revoke/
-# ssh-list manage per-project production SSH access for agents running in
-# the sandbox.
+# Mac-side CLI for the sandbox container. up/rebuild/status go to
+# sandbox/host/sandbox-host on the box; the rest run over SSH to the sandbox,
+# where push copies secrets in and sync-env refreshes them.
 set -euo pipefail
 
 HOST=${SANDBOX_HOST:-vince-archive}
@@ -26,6 +24,7 @@ usage: vinceworks sandbox <command> [args]
   vinceworks sandbox status                                show systemd status for the sandbox
   vinceworks sandbox push <url|name> [paths...] [--ssh <target>]
                                                             clone a repo into the sandbox if needed, copy its secret files in, and optionally grant it ssh access to <target>
+  vinceworks sandbox sync-env <project> [--worktrees]     refresh an existing checkout's .env from this Mac, keeping each PORT
   vinceworks sandbox ps                                    list worktrees, their ports and what is listening
   vinceworks sandbox ssh-grant <project> <target>          generate a scoped ssh key in the sandbox and grant <project> access to <target>
   vinceworks sandbox ssh-revoke <project> [target]         revoke <project>'s ssh access, to one <target> or every target it has
@@ -590,6 +589,102 @@ cmd_push() {
   fi
 }
 
+# Refreshes an existing sandbox checkout's .env from this Mac. The sandbox owns
+# PORT (see sandbox/alloc-port); the old file is printed before it is replaced.
+cmd_sync_env() {
+  local worktrees=0
+  while [[ $# -gt 0 && "$1" == --* ]]; do
+    case "$1" in
+      --worktrees) worktrees=1 ;;
+      *) usage ;;
+    esac
+    shift
+  done
+  local project=${1:?project required}
+
+  local src="$LOCAL_PROJECTS/$project/.env"
+  [[ -f "$src" ]] || { echo "  [error] $src not found on this Mac" >&2; exit 1; }
+
+  local remote_project="projects/$project"
+  ssh "$SSH_HOST" "[ -d ~/$(printf %q "$remote_project") ]" \
+    || { echo "  [error] ~/$remote_project is not in the sandbox; run: vinceworks sandbox push $project" >&2; exit 1; }
+
+  local staged="/tmp/vinceworks-sync-env.$$"
+  scp -q "$src" "$SSH_HOST:$staged"
+  ssh "$SSH_HOST" "sh -s -- $(printf %q "$remote_project") $(printf %q "$staged") $(printf %q "$worktrees")" <<'REMOTE'
+set -eu
+project=$HOME/$1
+staged=$2
+worktrees=$3
+
+merged=$(mktemp)
+trap 'rm -f "$merged" "$staged"' EXIT
+
+if ! checkouts=$(git -C "$project" worktree list --porcelain); then
+  echo "  [error] $project is not a git checkout" >&2
+  exit 1
+fi
+checkouts=$(printf '%s\n' "$checkouts" | sed -n 's/^worktree //p')
+[ -n "$checkouts" ] || { echo "  [error] no worktrees found for $project" >&2; exit 1; }
+
+skipped=0
+while IFS= read -r dir; do
+  [ -d "$dir" ] || continue
+  if [ "$dir" != "$project" ] && [ "$worktrees" != "1" ]; then
+    skipped=$((skipped + 1))
+    continue
+  fi
+
+  port=$(sed -n 's/^PORT=//p' "$dir/.env" 2>/dev/null | head -1)
+
+  # Every line but PORT comes from this Mac; the sandbox hands out the ports,
+  # and moving a running app's port would break its published URL.
+  if [ -n "$port" ] && grep -q '^PORT=' "$staged"; then
+    awk -v p="$port" '{ if ($0 ~ /^PORT=/) print "PORT=" p; else print }' "$staged" > "$merged"
+  else
+    cat "$staged" > "$merged"
+    if [ -n "$port" ]; then
+      if [ -s "$merged" ] && [ -n "$(tail -c1 "$merged")" ]; then
+        printf '\n' >> "$merged"
+      fi
+      printf 'PORT=%s\n' "$port" >> "$merged"
+    fi
+  fi
+
+  if [ -f "$dir/.env" ]; then
+    if cmp -s "$merged" "$dir/.env"; then
+      echo "  [skip] $dir/.env already matches this Mac"
+      continue
+    fi
+    echo "  [old] $dir/.env"
+    echo "  [old] begin"
+    cat "$dir/.env"
+    echo "  [old] end"
+  else
+    ( umask 077; : > "$dir/.env" )    # a new secret file starts private
+  fi
+
+  cat "$merged" > "$dir/.env"
+  if [ -n "$port" ]; then
+    echo "  [synced] $dir/.env (kept PORT=$port)"
+  else
+    echo "  [synced] $dir/.env"
+  fi
+
+  if [ -z "$port" ] && [ "$dir" != "$project" ]; then
+    new_port=$("$HOME/vinceworks/sandbox/alloc-port" "$dir")
+    echo "  [port] allocated PORT=$new_port"
+  fi
+done <<EOF
+$checkouts
+EOF
+
+if [ "$skipped" -gt 0 ]; then
+  echo "  [skip] $skipped worktree(s) left alone; pass --worktrees to include them"
+fi
+REMOTE
+}
+
 cmd_sync_credential() {
   local var=${1:?variable name required}
   local creds_file="$HOME/.credentials"
@@ -629,6 +724,7 @@ shift
 case "$command" in
   up|rebuild|status) remote "$command" ;;
   push) cmd_push "$@" ;;
+  sync-env) cmd_sync_env "$@" ;;
   ps) ssh "$SSH_HOST" '~/vinceworks/sandbox/ps' ;;
   ssh-grant) cmd_ssh_grant "$@" ;;
   ssh-revoke) cmd_ssh_revoke "$@" ;;

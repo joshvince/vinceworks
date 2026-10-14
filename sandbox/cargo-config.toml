@@ -1,0 +1,33 @@
+# Copied to ~/.cargo/config.toml by the entrypoint on every container start.
+#
+# Build configuration lives here rather than in environment variables on purpose.
+# sshd starts sessions with a clean environment -- the entrypoint already re-exports
+# the image's variables into .zshenv by hand for that reason -- and an agent may reach
+# cargo without going through zsh at all. A file cargo always reads cannot be bypassed
+# that way, and it is one place to look rather than several. See parallel-builds.md.
+
+[build]
+# Three cores are available to the container. Cargo's own detection of a cgroup quota
+# varies with toolchain and cgroup version, so set this rather than trusting it.
+jobs = 3
+
+# Uncommented by the entrypoint when the cache binary exists. A wrapper path is a hard
+# dependency for every cargo command in the container, so if the binary is missing
+# this stays commented and builds run normally, rather than every one of them failing
+# with "could not execute process".
+#rustc-wrapper = "/usr/local/bin/sccache"
+
+[env]
+# The cache lives in the bind-mounted home, so it survives worktree teardown, container
+# restarts and image rebuilds -- nothing inside a worktree can, since it is deleted with
+# the worktree. Cargo applies this table to the wrapper's own process, which is the
+# process that needs to know where the cache is.
+SCCACHE_DIR = "/home/josh/.cache/sccache"
+SCCACHE_CACHE_SIZE = "30G"
+
+# Dependencies compile with full debug info by default, which is a large share of both
+# the compile time and the disk each worktree occupies, and is almost never read: agents
+# debug their own code, not the internals of a dependency. The wildcard applies to
+# dependencies only, never to workspace members, so the application keeps its own.
+[profile.dev.package."*"]
+debug = false

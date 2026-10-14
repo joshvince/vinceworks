@@ -26,6 +26,7 @@ usage: vinceworks sandbox <command> [args]
                                                             clone a repo into the sandbox if needed, copy its secret files in, and optionally grant it ssh access to <target>
   vinceworks sandbox sync-env <project> [--worktrees]     refresh an existing checkout's .env from this Mac, keeping each PORT
   vinceworks sandbox ps                                    list worktrees, their ports and what is listening
+  vinceworks sandbox reap [--apply] [--days N]             report stale build output and finished worktrees, deleting nothing without --apply
   vinceworks sandbox ssh-grant <project> <target>          generate a scoped ssh key in the sandbox and grant <project> access to <target>
   vinceworks sandbox ssh-revoke <project> [target]         revoke <project>'s ssh access, to one <target> or every target it has
   vinceworks sandbox ssh-list                              list every project's current ssh grants
@@ -717,6 +718,12 @@ REMOTE
   echo "  [synced] $var -> $SSH_HOST:~/.credentials"
 }
 
+cmd_reap() {
+  local args=""
+  if (( $# )); then args=$(printf '%q ' "$@"); fi
+  ssh "$SSH_HOST" "~/vinceworks/sandbox/reap $args"
+}
+
 command=${1:-}
 [[ -n "$command" ]] || usage
 shift
@@ -726,6 +733,7 @@ case "$command" in
   push) cmd_push "$@" ;;
   sync-env) cmd_sync_env "$@" ;;
   ps) ssh "$SSH_HOST" '~/vinceworks/sandbox/ps' ;;
+  reap) cmd_reap "$@" ;;
   ssh-grant) cmd_ssh_grant "$@" ;;
   ssh-revoke) cmd_ssh_revoke "$@" ;;
   ssh-list) cmd_ssh_list "$@" ;;

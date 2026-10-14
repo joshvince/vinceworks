@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+# Runs a compile under one of a small number of slots, so several agents building at
+# once do not each assume they own every core.
+#
+# Concurrent builds on this box do not just split the time, they make each other
+# slower: memory is single-channel, peak compile and link memory multiplies inside a
+# container limit shared with the database and the browsers, and every build ends in a
+# single-threaded link that gets starved while others run. The measurements behind that
+# are in parallel-builds.md.
+#
+#   build-slot cargo test
+#   VINCEWORKS_BUILD_SLOTS=2 build-slot cargo build
+#
+# Only compiles are gated. Anything that keeps running once it has started (cargo run,
+# dev, watch) passes straight through, because it would hold its slot until the process
+# exited. The same reasoning applies to a test suite that boots a browser: build first
+# with `build-slot cargo test --no-run`, then run the tests ungated.
+set -euo pipefail
+
+slots=${VINCEWORKS_BUILD_SLOTS:-1}
+# One fixed path, not a per-shell one: if two agents disagreed about where the slots
+# live, they would both take "the only slot" and the gate would silently stop working.
+dir=/tmp/vinceworks-build-slots
+gated=" build check test bench clippy doc nextest install "
+
+[[ $# -ge 1 ]] || { echo "usage: build-slot <command> [args...]" >&2; exit 2; }
+
+# A gated build that shells out to another gated build must not wait on a slot that its
+# own parent is already holding.
+if [[ -n "${VINCEWORKS_BUILD_SLOT_HELD:-}" ]]; then
+  exec "$@"
+fi
+
+# flock is util-linux and absent on macOS. Fail open rather than breaking a build somewhere
+# the gate has nothing to protect. If this ever fires inside the sandbox it says so.
+if ! command -v flock >/dev/null 2>&1; then
+  echo "build-slot: flock unavailable, running ungated" >&2
+  exec "$@"
+fi
+
+cmd=$(basename "$1")
+sub=${2:-}
+[[ "$sub" == +* ]] && sub=${3:-}          # cargo +toolchain <subcommand>
+
+if [[ "$cmd" == cargo && "$gated" != *" $sub "* ]]; then
+  exec "$@"
+fi
+
+mkdir -p "$dir"
+
+# Taking a slot means holding the open descriptor, so the slot is released when this
+# process exits, whatever it exits with.
+acquire() {
+  local i fd
+  for (( i = 0; i < slots; i++ )); do
+    exec {fd}>>"$dir/slot.$i"
+    if flock -n "$fd"; then
+      slot=$i
+      return 0
+    fi
+    exec {fd}>&-
+  done
+  return 1
+}
+
+if ! acquire; then
+  # Say so immediately. An agent whose tool times out sees a failed command rather than
+  # a waiting one, and retries, and lengthens the queue it is standing in.
+  #
+  # No queue position is printed: flock has no queue order, so a number here would be
+  # invented rather than measured, and a wrong number is worse than none. The heartbeat
+  # is what keeps the wait visible.
+  waited=0
+  printf 'build-slot: all %d slot(s) busy, waiting\n' "$slots" >&2
+  until acquire; do
+    sleep 5
+    waited=$(( waited + 5 ))
+    (( waited % 30 )) || printf 'build-slot: still waiting after %ds\n' "$waited" >&2
+  done
+  printf 'build-slot: slot %d free after %ds\n' "$slot" "$waited" >&2
+fi
+
+export VINCEWORKS_BUILD_SLOT_HELD=1
+exec "$@"

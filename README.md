@@ -36,7 +36,7 @@ vinceworks:update --packages   # also run brew bundle for missing packages
 ---
 
 ### `vinceworks:ai`
-Sets up AI tooling and syncs agents and skills. Installs Claude Code and OpenCode if not already present, then symlinks all agent definitions from `ai/agents/` into `~/.claude/agents/` and `~/.opencode/agents/`, and all skill directories from `ai/skills/` into `~/.claude/skills/` and `~/.config/opencode/skills/`, so they're available globally across all projects. Re-run whenever you add a new agent or skill.
+Sets up AI tooling and syncs agents and skills. Installs Claude Code if not already present, then writes the agent definitions from `ai/agents/` into `~/.claude/agents/` (frontmatter translated) and symlinks every skill directory from `ai/skills/` into `~/.claude/skills/` and `~/.agents/skills/`, so they're available globally across all projects. Re-run whenever you add a new agent or skill.
 
 ```sh
 vinceworks:ai

@@ -47,10 +47,10 @@ RUN curl -fsSL -o /tmp/sccache.tar.gz \
 RUN printf 'local all all trust\nhost all all 127.0.0.1/32 trust\nhost all all ::1/128 trust\n' \
       | tee /etc/postgresql/*/main/pg_hba.conf >/dev/null
 
-# Node 22 from NodeSource. OpenCode is an npm global on a system path because the home is bind-mounted at runtime and would hide anything installed there. The Paseo CLI baked in here is the fallback for the copy ai.sh installs into the persistent home. Claude Code also lives in the persistent home: ai.sh runs its native installer on first start, and it self-updates.
+# Node 22 from NodeSource, for the npm globals below. They sit on a system path because the home is bind-mounted at runtime and would hide anything installed there. The Paseo CLI baked in here is the fallback for the copy ai.sh installs into the persistent home. Claude Code also lives in the persistent home: ai.sh runs its native installer on first start, and it self-updates.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g @getpaseo/cli@latest opencode-ai \
+    && npm install -g @getpaseo/cli@latest \
     && chown -R "$UID:$GID" /usr/lib/node_modules/@getpaseo \
     && rm -rf /var/lib/apt/lists/*
 
@@ -81,7 +81,7 @@ USER $USERNAME
 WORKDIR /home/$USERNAME
 
 # Every process the entrypoint spawns inherits this PATH, including agent harnesses that
-# freeze it into their own shell. Shims go last so a mise node stays behind the system node Paseo and OpenCode run on.
+# freeze it into their own shell. Shims go last so a mise node stays behind the system node Paseo runs on.
 # The Rust toolchain's bin directory sits ahead of the system ones, so cargo and rustc are the
 # pair from the persistent home rather than the system rustc the image no longer installs.
 ENV HOME=/home/$USERNAME \

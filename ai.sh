@@ -1,14 +1,9 @@
 #!/usr/bin/env zsh
-# Installs AI tools and propagates shared agent/skill definitions into Claude Code and OpenCode.
+# Installs AI tools and propagates shared agent/skill definitions into Claude Code.
 #
-# Agent files in ./ai/agents are written in OpenCode's frontmatter format. We:
-#   - symlink them into ~/.config/opencode/agents/ (OpenCode reads this dir)
-#   - translate-and-copy them into ~/.claude/agents/ (Claude Code uses a different
-#     frontmatter shape — `name` + `description`, no per-tool permission block)
-#
-# Skill directories in ./ai/skills use SKILL.md — same format across providers,
-# so we just symlink each skill directory into ~/.claude/skills/,
-# ~/.config/opencode/skills/, and the harness-agnostic ~/.agents/skills/.
+# The agent files in ./ai/agents keep OpenCode's frontmatter format and are translated on
+# the way into ~/.claude/agents/, which wants `name` + `description` and no permission
+# block. Skill directories need no translation: SKILL.md is the same format everywhere.
 #
 # Use --force to overwrite existing files / wrong-target symlinks.
 # Use --update to update installed tools without installing missing ones or syncing files.
@@ -43,17 +38,6 @@ if $UPDATE; then
     print "  [skip]    Claude Code not installed"
   fi
 
-  if command -v opencode &>/dev/null; then
-    print "  Updating OpenCode..."
-    if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
-      sudo npm install -g opencode-ai@latest
-    else
-      opencode upgrade
-    fi
-  else
-    print "  [skip]    OpenCode not installed"
-  fi
-
   if command -v paseo &>/dev/null; then
     print "  Updating Paseo..."
     if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
@@ -84,13 +68,6 @@ else
   curl -fsSL https://claude.ai/install.sh | bash
 fi
 
-if command -v opencode &>/dev/null; then
-  print "  [skip]    OpenCode already installed"
-else
-  print "  Installing OpenCode..."
-  curl -fsSL https://opencode.ai/install | bash
-fi
-
 if [[ "${VINCEWORKS_CONTEXT:-}" == sandbox ]]; then
   if [[ -x "$HOME/.local/bin/paseo" ]]; then
     print "  [skip]    Paseo already installed"
@@ -107,7 +84,6 @@ fi
 # --- Agents ---
 
 AGENTS_SOURCE="$VINCEWORKS_DIR/ai/agents"
-OPENCODE_AGENTS_DIR="$HOME/.config/opencode/agents"
 CLAUDE_AGENTS_DIR="$HOME/.claude/agents"
 
 if [[ ! -d "$AGENTS_SOURCE" ]]; then
@@ -120,32 +96,6 @@ if [[ ${#agent_files[@]} -eq 0 ]]; then
   print "\nNo agent files found in $AGENTS_SOURCE — nothing to do."
   exit 0
 fi
-
-# Symlink an OpenCode-format agent into OpenCode's agents dir.
-link_opencode_agent() {
-  local src=$1 dest=$2
-  if [[ -L "$dest" ]]; then
-    local current_target=$(readlink "$dest")
-    if [[ "$current_target" == "$src" ]]; then
-      print "  [ok]      $dest"
-    elif $FORCE; then
-      rm "$dest" && ln -s "$src" "$dest"
-      print "  [replaced] $dest (was -> $current_target)"
-    else
-      print "  [warn]    $dest points elsewhere — skipping (use --force)"
-    fi
-  elif [[ -e "$dest" ]]; then
-    if $FORCE; then
-      rm "$dest" && ln -s "$src" "$dest"
-      print "  [replaced] $dest (was a regular file)"
-    else
-      print "  [warn]    $dest exists as a regular file — skipping (use --force)"
-    fi
-  else
-    ln -s "$src" "$dest"
-    print "  [linked]  $dest"
-  fi
-}
 
 # Write the Claude Code translation of an OpenCode-format agent to `dest`.
 # Tools field is omitted intentionally — current source files use only allow/ask
@@ -218,12 +168,6 @@ install_claude_agent() {
   print "  [written] $dest"
 }
 
-print "\nLinking OpenCode agents..."
-mkdir -p "$OPENCODE_AGENTS_DIR"
-for agent_file in "${agent_files[@]}"; do
-  link_opencode_agent "$agent_file" "$OPENCODE_AGENTS_DIR/${agent_file:t}"
-done
-
 print "\nWriting Claude Code agents (frontmatter translated)..."
 mkdir -p "$CLAUDE_AGENTS_DIR"
 for agent_file in "${agent_files[@]}"; do
@@ -234,11 +178,10 @@ done
 
 SKILLS_SOURCE="$VINCEWORKS_DIR/ai/skills"
 CLAUDE_SKILLS_DIR="$HOME/.claude/skills"
-OPENCODE_SKILLS_DIR="$HOME/.config/opencode/skills"
 AGENTS_SKILLS_DIR="$HOME/.agents/skills"
 
-# Symlink a skill directory into a provider's skills dir. Same SKILL.md format
-# works for both providers, so no translation step is needed (unlike agents).
+# Symlink a skill directory into a provider's skills dir. SKILL.md is the same
+# format across harnesses, so no translation step is needed (unlike agents).
 link_skill() {
   local src=$1 dest=$2
   if [[ -L "$dest" ]]; then
@@ -268,11 +211,10 @@ skill_dirs=("$SKILLS_SOURCE"/*(N/))
 if [[ ${#skill_dirs[@]} -eq 0 ]]; then
   print "\nNo skill directories found in $SKILLS_SOURCE — skipping skills."
 else
-  print "\nLinking skills into Claude Code, OpenCode, and ~/.agents/skills..."
-  mkdir -p "$CLAUDE_SKILLS_DIR" "$OPENCODE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
+  print "\nLinking skills into Claude Code and ~/.agents/skills..."
+  mkdir -p "$CLAUDE_SKILLS_DIR" "$AGENTS_SKILLS_DIR"
   for skill_dir in "${skill_dirs[@]}"; do
     link_skill "$skill_dir" "$CLAUDE_SKILLS_DIR/${skill_dir:t}"
-    link_skill "$skill_dir" "$OPENCODE_SKILLS_DIR/${skill_dir:t}"
     link_skill "$skill_dir" "$AGENTS_SKILLS_DIR/${skill_dir:t}"
   done
 fi

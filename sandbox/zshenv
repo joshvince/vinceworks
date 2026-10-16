@@ -11,6 +11,6 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # missing. The shims resolve the right project version from any directory.
 # Appended rather than prepended: nothing on PATH is shadowed today, and if mise
 # ever manages node for a project, a node shim must not take precedence over the
-# system node that the Paseo CLI and OpenCode run on. MISE_DATA_DIR is not usable
+# system node that the Paseo CLI runs on. MISE_DATA_DIR is not usable
 # here: the entrypoint appends it to this file below, so it is unset at this line.
 export PATH="$PATH:$HOME/.local/share/mise/shims"

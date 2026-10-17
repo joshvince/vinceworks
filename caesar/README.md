@@ -37,8 +37,8 @@ The policy grants access to named devices. The box is registered as one of my ow
    "grants": [{ "src": ["josh-mac", "josh-iphone"], "dst": ["tag:caesar"], "ip": ["tcp:443"] }]
    ```
 
-4. Make sure HTTPS certificates are enabled for the tailnet (DNS page). Enabling HTTPS puts Caesar's device name in public certificate logs, so the name is public and the policy is the access control.
-5. Create an auth key (Settings, Keys): single-use, pre-approved, ephemeral off, tagged `tag:caesar`. `setup` asks for it.
+4. Make sure HTTPS certificates are enabled for the tailnet (DNS page). Enabling HTTPS puts Caesar's device name in public certificate logs, so the name is public. The policy decides which devices can connect, and Caesar's app also refuses cross-site requests, as the caesar repo's plan requires.
+5. Create an auth key (Settings, Keys): single-use, pre-approved, ephemeral off, tagged `tag:caesar`. A one-day expiry is fine. `setup` asks for it; if you pass it with `--tailscale-authkey-file`, delete the file afterwards.
 
 ### On the box and the Mac
 

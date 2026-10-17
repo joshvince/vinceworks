@@ -59,6 +59,9 @@ ln -sf "$vinceworks/sandbox/screenshot" "$HOME/.local/bin/screenshot"
 # deliberately not linked here: it is an operator tool, and agents do not need a command that
 # deletes their own worktrees on their PATH.
 ln -sf "$vinceworks/sandbox/build-slot" "$HOME/.local/bin/build-slot"
+# Same reason as build-slot: an agent should not need to know where the repo is mounted
+# to take turns over something only one run can hold.
+ln -sf "$vinceworks/sandbox/with-gate" "$HOME/.local/bin/with-gate"
 
 echo "Preparing sshd..."
 mkdir -p "$HOME/projects" "$sshd_dir"

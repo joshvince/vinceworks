@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Runs a command under one of a small number of slots for a named gate, so that
+# concurrent sessions take turns over a resource only one of them can use.
+#
+# Only put things behind a gate that genuinely cannot run at once. If a resource can
+# be made per-checkout instead, do that: taking turns costs time every run, and a
+# resource that does not collide costs nothing.
+set -euo pipefail
+
+gate=${1:?usage: with-gate <gate> <command> [args...]}
+shift
+[[ $# -ge 1 ]] || { echo "usage: with-gate <gate> <command> [args...]" >&2; exit 2; }
+
+slots=${GATE_SLOTS:-1}
+base=${GATE_DIR:-/tmp/with-gate}
+dir=$base/$gate
+
+# A gated command can run another gated command, including on the same gate. Pass
+# straight through when this process is already holding a slot somewhere in its
+# ancestry, or it waits on a lock its own parent is holding and deadlocks.
+case ":${GATE_HELD:-}:" in
+  *":$gate:"*) exec "$@" ;;
+esac
+
+# Fail open if the locking tool is missing: a missing developer tool should cost the
+# guarantee, not the command.
+if ! command -v flock >/dev/null 2>&1; then
+  echo "with-gate: flock unavailable, running the $gate command ungated" >&2
+  exec "$@"
+fi
+
+mkdir -p "$dir"
+
+# Holding the open descriptor is holding the slot, so it is released when this
+# process exits, whatever it exits with, including a signal.
+acquire() {
+  local i fd
+  for (( i = 0; i < slots; i++ )); do
+    exec {fd}>>"$dir/slot.$i"
+    if flock -n "$fd"; then
+      slot=$i
+      return 0
+    fi
+    exec {fd}>&-
+  done
+  return 1
+}
+
+if ! acquire; then
+  # Say so immediately. A caller whose tool call produces no output reads as hung,
+  # and retries or kills it, which makes the queue worse.
+  #
+  # No queue position: flock has no queue order, so any number here would be
+  # invented, and a number that is wrong is worse than no number.
+  waited=0
+  printf 'with-gate: all %d slot(s) for %s busy, waiting\n' "$slots" "$gate" >&2
+  until acquire; do
+    sleep 5
+    waited=$(( waited + 5 ))
+    (( waited % 30 )) || printf 'with-gate: still waiting for %s, %ds\n' "$gate" "$waited" >&2
+  done
+  printf 'with-gate: %s slot %d free after %ds\n' "$gate" "$slot" "$waited" >&2
+fi
+
+export GATE_HELD="${GATE_HELD:+$GATE_HELD:}$gate"
+exec "$@"

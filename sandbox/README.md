@@ -52,6 +52,17 @@ Only compiles are gated. `cargo run`, `dev` and `watch` pass straight through, b
 
 The Rust toolchain lives in the persistent home (`~/.cargo`, `~/.rustup`) and the image installs no compiler, deliberately, so there is only ever one to mismatch. Install it there on a fresh home; see the first-boot steps below.
 
+## Taking turns over a shared resource
+
+Some things cannot run twice at once on this box and cannot be made per-checkout: a webdriver on a fixed port, or a desktop app that refuses a second launch. `with-gate` serialises those. The gate name is part of the interface, so unrelated resources do not share a queue:
+
+```sh
+with-gate e2e npm run test:e2e
+GATE_SLOTS=2 with-gate e2e npm run test:e2e
+```
+
+The shape is the same as `build-slot`. The slot is an open file descriptor taken with `flock`, so it is released however the holder exits, including a signal. A wait announces itself and then heartbeats rather than printing a queue position it cannot measure. A gated command that runs another gated command passes through instead of deadlocking on its own parent. A missing `flock` fails open, so the worst case is an ungated run that says so. Call it from the project's own entry point for the shared thing, so running that entry point is safe without anyone remembering to wrap it. [gating-shared-resources.md](gating-shared-resources.md) has the reasoning, the failure behind each property, and the anti-patterns to remove when you gate something.
+
 ## Paseo
 
 [Paseo](https://paseo.sh/docs) is a very cool open source project that lets you easily run multiple git-worktree-based agent sessions. It has a nice UX and the killer app for me is the ability to use multiple hosts. It is the bridge between a machine (like my phone) and this podman container.  

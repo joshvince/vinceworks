@@ -20,7 +20,7 @@ It's not **safe** as such, but it is a lot safer than doing this stuff on my own
 
 ## Updating AI tools
 
-Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Claude Code, and Paseo. Missing tools are skipped. Paseo lives under `~/.local` in the persistent home, so its update survives restarts and image rebuilds; restart the sandbox afterward to run the new daemon. If a release breaks the daemon, remove `~/.local/bin/paseo` and `~/.local/lib/node_modules/@getpaseo` (under `~/vinceworks-sandbox` on the box) and restart: the copy baked into the image takes over.
+Run `~/vinceworks/ai.sh --update` inside the sandbox to update installed pi, Claude Code, and Paseo. Missing tools are skipped. Starting the sandbox runs `ai.sh` without `--update`, which installs a missing pi extension and keeps an installed one at its current version, so third-party extension code changes only when I run the update. Paseo lives under `~/.local` in the persistent home, so its update survives restarts and image rebuilds; restart the sandbox afterward to run the new daemon. If a release breaks the daemon, remove `~/.local/bin/paseo` and `~/.local/lib/node_modules/@getpaseo` (under `~/vinceworks-sandbox` on the box) and restart: the copy baked into the image takes over.
 
 ## `vinceworks` cli
 

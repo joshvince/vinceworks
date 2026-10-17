@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Mac-side CLI for Caesar. setup, status and logs go to caesar/host/caesar-host on the
+# box; deploy streams a git archive of the caesar repo to it. Secrets travel on ssh's
+# stdin, which keeps them off process lists.
+set -euo pipefail
+
+HOST=${CAESAR_HOST:-vince-archive}
+LOCAL_REPO=${CAESAR_LOCAL:-$HOME/projects/caesar}
+
+usage() {
+  cat <<USAGE
+usage: vinceworks caesar <command> [args]
+
+  vinceworks caesar setup [--force] [--tailscale-authkey-file <path>]
+                                                        prepare the box for Caesar, safe to re-run; --force rewrites secrets.env and a staged auth key
+  vinceworks caesar deploy [ref]                        build <ref> (default main) of the caesar repo on the box and restart Caesar
+  vinceworks caesar status                              show systemd and Tailscale status for Caesar
+  vinceworks caesar logs                                follow Caesar's journal
+USAGE
+  exit 1
+}
+
+remote() { ssh "$HOST" "\$HOME/vinceworks/caesar/host/caesar-host $1"; }
+remote_tty() { ssh -t "$HOST" "\$HOME/vinceworks/caesar/host/caesar-host $1"; }
+
+cmd_setup() {
+  local force="" authkey_file=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) force=" --force" ;;
+      --tailscale-authkey-file) authkey_file=${2:?--tailscale-authkey-file requires a path}; shift ;;
+      *) usage ;;
+    esac
+    shift
+  done
+
+  # The box decides which secrets setup will write, and only those are collected here.
+  local needs opencode_key="" key_var=OPENCODE_API_KEY tailscale_key=""
+  needs=$(remote "needs$force" </dev/null)
+
+  if grep -qx opencode-api-key <<<"$needs"; then
+    if [[ -n "${CAESAR_OPENCODE_API_KEY:-}" ]]; then key_var=CAESAR_OPENCODE_API_KEY; fi
+    opencode_key=${!key_var:-}
+    [[ -n "$opencode_key" ]] || { echo "  [error] neither CAESAR_OPENCODE_API_KEY nor OPENCODE_API_KEY is set on this Mac; export one and re-run" >&2; exit 1; }
+    # The entrypoint sources secrets.env as shell, so the value has to survive that unquoted.
+    [[ "$opencode_key" =~ ^[A-Za-z0-9._/+=:@,-]+$ ]] ||
+      { echo "  [error] $key_var has characters outside A-Z a-z 0-9 . _ / + = : @ , -" >&2; exit 1; }
+  fi
+
+  if grep -qx tailscale-authkey <<<"$needs"; then
+    if [[ -n "$authkey_file" ]]; then
+      [[ -f "$authkey_file" ]] || { echo "  [error] $authkey_file not found" >&2; exit 1; }
+      tailscale_key=$(tr -d '[:space:]' <"$authkey_file")
+    else
+      [[ -t 0 ]] || { echo "  [error] the auth key needs an interactive prompt or --tailscale-authkey-file <path>" >&2; exit 1; }
+      read -rsp "Tailscale auth key (single-use, tagged tag:caesar): " tailscale_key
+      echo
+    fi
+    [[ "$tailscale_key" == tskey-* ]] || { echo "  [error] expected a Tailscale auth key starting with tskey-" >&2; exit 1; }
+  fi
+
+  printf '%s\n%s\n' "$opencode_key" "$tailscale_key" | remote "setup$force"
+}
+
+cmd_deploy() {
+  local ref=${1:-main} sha
+  [[ -d "$LOCAL_REPO" ]] || { echo "  [error] $LOCAL_REPO not found; set CAESAR_LOCAL to the caesar checkout" >&2; exit 1; }
+  git -C "$LOCAL_REPO" rev-parse --verify --quiet "$ref^{commit}" >/dev/null ||
+    { echo "  [error] ref $ref is missing from $LOCAL_REPO" >&2; exit 1; }
+  sha=$(git -C "$LOCAL_REPO" rev-parse --short "$ref")
+
+  git -C "$LOCAL_REPO" archive --format=tar "$ref" | remote deploy
+  echo "  [ok] deployed $sha ($ref)"
+  echo "  check it with: vinceworks caesar status"
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  setup) cmd_setup "$@" ;;
+  deploy) cmd_deploy "$@" ;;
+  status) remote_tty status ;;
+  logs) remote_tty logs ;;
+  -h|--help|help) usage ;;
+  *) usage ;;
+esac

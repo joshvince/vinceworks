@@ -1,0 +1,11 @@
+[Unit]
+Description=Caesar host snapshot, every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+# The default 1min accuracy lets systemd slide a run by up to a minute.
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

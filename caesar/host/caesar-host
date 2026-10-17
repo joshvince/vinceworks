@@ -78,6 +78,30 @@ write_private() {
   mv "$tmp" "$dest"
 }
 
+# Every coding agent can write the sandbox's home, so a symlink planted on the way to its
+# sshd files would point setup, which runs as josh, at any file on the host.
+check_sandbox_sshd() {
+  local real file
+  real=$(realpath -m "$SANDBOX_SSHD")
+  [[ "$real" == "$(realpath "$HOME")/vinceworks-sandbox/.ssh/sshd" ]] ||
+    die "$SANDBOX_SSHD resolves to $real; remove the symlink on that path and re-run setup"
+  for file in ssh_host_ed25519_key.pub authorized_keys; do
+    [[ ! -L "$SANDBOX_SSHD/$file" ]] ||
+      die "$SANDBOX_SSHD/$file is a symlink and setup will not follow it; check what created it, replace it with a regular file and re-run setup"
+  done
+}
+
+# The check runs again before each open, and nofollow covers the moment between the two.
+read_sandbox_file() {
+  check_sandbox_sshd
+  dd if="$SANDBOX_SSHD/$1" iflag=nofollow status=none || die "could not read $SANDBOX_SSHD/$1"
+}
+
+append_sandbox_file() {
+  check_sandbox_sshd
+  dd of="$SANDBOX_SSHD/$1" oflag=append,nofollow conv=notrunc status=none || die "could not append to $SANDBOX_SSHD/$1"
+}
+
 cmd_needs() {
   if needs_opencode_key; then echo opencode-api-key; fi
   if needs_tailscale_key; then echo tailscale-authkey; fi
@@ -90,8 +114,9 @@ cmd_setup() {
     IFS= read -r tailscale_key || true
   fi
 
-  local auth="$SANDBOX_SSHD/authorized_keys" key="$DATA/ssh/id_ed25519"
-  [[ -f "$SANDBOX_SSHD/ssh_host_ed25519_key.pub" && -f "$auth" ]] ||
+  local key="$DATA/ssh/id_ed25519"
+  check_sandbox_sshd
+  [[ -f "$SANDBOX_SSHD/ssh_host_ed25519_key.pub" && -f "$SANDBOX_SSHD/authorized_keys" ]] ||
     die "the sandbox's sshd keys are missing from $SANDBOX_SSHD; start the sandbox once with: vinceworks sandbox up"
   if needs_opencode_key && [[ -z "$opencode_key" ]]; then
     die "secrets.env needs an OpenCode API key on stdin; run setup through: vinceworks caesar setup"
@@ -125,22 +150,25 @@ cmd_setup() {
     log ok "generated the tunnel key"
   fi
 
-  local blob line
+  local blob line authorized prefix=""
   blob=$(ssh-keygen -y -f "$key" | awk '{ print $2 }')
   line="$TUNNEL_OPTIONS ssh-ed25519 $blob $TUNNEL_COMMENT"
-  if grep -qxF "$line" "$auth"; then
+  # $(...) strips trailing newlines, so the sentinel keeps the file's last one for the check below.
+  authorized=$(read_sandbox_file authorized_keys; echo x)
+  authorized=${authorized%x}
+  if grep -qxF "$line" <<<"$authorized"; then
     log skip "Caesar's key is in the sandbox's authorized_keys"
-  elif grep -qF "$blob" "$auth"; then
+  elif grep -qF "$blob" <<<"$authorized"; then
     die "the sandbox's authorized_keys holds Caesar's key with other options; remove that line and re-run setup"
   else
     # A last line missing its newline would swallow the new key.
-    if [[ -n "$(tail -c1 "$auth")" ]]; then printf '\n' >>"$auth"; fi
-    printf '%s\n' "$line" >>"$auth"
+    if [[ -n "$authorized" && "$authorized" != *$'\n' ]]; then prefix=$'\n'; fi
+    append_sandbox_file authorized_keys <<<"$prefix$line"
     log ok "added Caesar's key to the sandbox's authorized_keys"
   fi
 
   local hostkey
-  hostkey=$(awk '{ print $1, $2 }' "$SANDBOX_SSHD/ssh_host_ed25519_key.pub")
+  hostkey=$(read_sandbox_file ssh_host_ed25519_key.pub | awk '{ print $1, $2 }')
   if [[ -f "$DATA/ssh/known_hosts" && "$(cat "$DATA/ssh/known_hosts")" == "vinceworks-sandbox $hostkey" ]]; then
     log skip "known_hosts matches the sandbox's host key"
   else

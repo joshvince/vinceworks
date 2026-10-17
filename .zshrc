@@ -81,7 +81,3 @@ export path
 export PATH="$HOME/.local/bin:$PATH"
 
 command -v rbenv >/dev/null && eval "$(rbenv init - zsh)"
-
-# opencode
-export PATH=/Users/joshvince/.opencode/bin:$PATH
-ulimit -n 10240

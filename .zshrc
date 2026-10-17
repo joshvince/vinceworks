@@ -81,3 +81,6 @@ export path
 export PATH="$HOME/.local/bin:$PATH"
 
 command -v rbenv >/dev/null && eval "$(rbenv init - zsh)"
+
+# macOS defaults to 256 open files; raise it for terminal-launched agents and builds.
+ulimit -n 10240

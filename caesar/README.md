@@ -4,7 +4,7 @@ Caesar is a persistent orchestrator agent. He runs on the home server beside the
 
 ## How is it put together?
 
-- Caesar runs in his own rootless podman container, a systemd user quadlet ([`caesar.container`](caesar.container)) beside `vinceworks-sandbox` rather than inside it. His credentials and memory sit out of the coding agents' reach, and he stays up through sandbox restarts.
+- Caesar runs in his own rootless podman container, a systemd user quadlet ([`caesar.container`](caesar.container)) beside `vinceworks-sandbox` rather than inside it. His memory and his secrets, apart from an OpenCode key he may share with the sandbox, sit out of the coding agents' reach, and he stays up through sandbox restarts.
 - He joins the tailnet from inside the container as his own device, tagged `tag:caesar`. The tailnet policy grants my Mac and iPhones port 443 on that tag, and that is how he is reached.
 - He reaches the Paseo daemon in the sandbox through an SSH tunnel to the sandbox's sshd on port 2222. The tunnel key is generated on the host. Its entry in the sandbox's `authorized_keys` allows local port forwards to `127.0.0.1:6767` and nothing else: `permitopen` pins the destination and the forced command `/bin/false` ends any session that asks for a shell.
 - He sees the host through a snapshot. A systemd user timer writes `~/caesar-host-stats/snapshot.json` every minute, and the container reads it from `/host-stats`.
@@ -44,7 +44,7 @@ The policy grants access to named devices. The box is registered as one of my ow
 
 1. Pull vinceworks on the box (`git -C ~/vinceworks pull`). The host-side scripts and units run from that checkout.
 2. Start the sandbox once (`vinceworks sandbox up`), so its sshd has generated its host key.
-3. Export `OPENCODE_API_KEY` in the shell on the Mac.
+3. Export `OPENCODE_API_KEY` in the shell on the Mac. `setup` uses `CAESAR_OPENCODE_API_KEY` instead when it is set, which gives Caesar an OpenCode key of his own.
 4. Run:
 
    ```sh
@@ -59,7 +59,7 @@ The policy grants access to named devices. The box is registered as one of my ow
 - installs the quadlet into `~/.config/containers/systemd` and the snapshot units into `~/.config/systemd/user`, then enables the snapshot timer;
 - generates the tunnel key if it is missing, and appends it to the sandbox's `authorized_keys` as `restrict,port-forwarding,permitopen="127.0.0.1:6767",command="/bin/false" ssh-ed25519 <key> vinceworks:caesar-tunnel`;
 - writes `known_hosts` from the sandbox sshd's host key;
-- writes `secrets.env` from the Mac's `$OPENCODE_API_KEY` when the file is missing or with `--force`;
+- writes `secrets.env` from the Mac's `$CAESAR_OPENCODE_API_KEY`, or `$OPENCODE_API_KEY` when that is unset, when the file is missing or with `--force`;
 - asks on the Mac for the Tailscale auth key (a silent prompt) while Caesar is unregistered, and stages it as `tailscale-authkey`. Secrets travel on ssh's stdin, so they stay out of the process lists on both machines.
 
 When a start fails to register him, the entrypoint keeps `tailscale-authkey` for the next start. Replace a bad key with `vinceworks caesar setup --force`, then `vinceworks caesar deploy` to restart him. To register him from scratch, remove `~/caesar-data/tailscale` on the box and run `setup` and `deploy` again.

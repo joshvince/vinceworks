@@ -35,15 +35,16 @@ cmd_setup() {
   done
 
   # The box decides which secrets setup will write, and only those are collected here.
-  local needs opencode_key="" tailscale_key=""
+  local needs opencode_key="" key_var=OPENCODE_API_KEY tailscale_key=""
   needs=$(remote "needs$force" </dev/null)
 
   if grep -qx opencode-api-key <<<"$needs"; then
-    opencode_key=${OPENCODE_API_KEY:-}
-    [[ -n "$opencode_key" ]] || { echo "  [error] OPENCODE_API_KEY is empty on this Mac; export it and re-run" >&2; exit 1; }
+    if [[ -n "${CAESAR_OPENCODE_API_KEY:-}" ]]; then key_var=CAESAR_OPENCODE_API_KEY; fi
+    opencode_key=${!key_var:-}
+    [[ -n "$opencode_key" ]] || { echo "  [error] neither CAESAR_OPENCODE_API_KEY nor OPENCODE_API_KEY is set on this Mac; export one and re-run" >&2; exit 1; }
     # The entrypoint sources secrets.env as shell, so the value has to survive that unquoted.
     [[ "$opencode_key" =~ ^[A-Za-z0-9._/+=:@,-]+$ ]] ||
-      { echo "  [error] OPENCODE_API_KEY has characters outside A-Z a-z 0-9 . _ / + = : @ , -" >&2; exit 1; }
+      { echo "  [error] $key_var has characters outside A-Z a-z 0-9 . _ / + = : @ , -" >&2; exit 1; }
   fi
 
   if grep -qx tailscale-authkey <<<"$needs"; then

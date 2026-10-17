@@ -1,0 +1,215 @@
+#!/usr/bin/env bash
+# Host-side implementation of the Caesar container. Runs on the Ubuntu box as
+# josh. The Mac CLI in ../caesar calls this over SSH: setup reads its secrets
+# from stdin and deploy reads a tar archive of the caesar repo.
+set -euo pipefail
+
+VINCEWORKS="$HOME/vinceworks"
+IMAGE=localhost/caesar:latest
+UNIT=caesar
+UNIT_DIR="$HOME/.config/containers/systemd"
+USER_UNIT_DIR="$HOME/.config/systemd/user"
+DATA="$HOME/caesar-data"
+STATS="$HOME/caesar-host-stats"
+SRC="$HOME/caesar-src"
+SANDBOX_SSHD="$HOME/vinceworks-sandbox/.ssh/sshd"
+TUNNEL_COMMENT=vinceworks:caesar-tunnel
+TUNNEL_OPTIONS='restrict,port-forwarding,permitopen="127.0.0.1:6767"'
+FORCE=0
+
+log() { printf '  [%s] %s\n' "$1" "$2"; }
+die() { log error "$1" >&2; exit 1; }
+
+usage() {
+  cat <<USAGE
+usage: caesar-host <command>
+
+  needs [--force]    list the secrets setup would write, one per line
+  setup [--force]    prepare the host for Caesar, reading those secrets from stdin
+  deploy             replace $SRC with the tar archive on stdin, build the image and restart Caesar
+  status             show systemd and Tailscale status for Caesar
+  logs               follow Caesar's journal
+USAGE
+  exit 1
+}
+
+parse_force() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --force) FORCE=1 ;;
+      *) usage ;;
+    esac
+    shift
+  done
+}
+
+# The entrypoint deletes tailscale-authkey after a successful `tailscale up`, so a key file
+# that is still there marks a registration still pending.
+tailscale_registered() { [[ -s "$DATA/tailscale/tailscaled.state" && ! -f "$DATA/tailscale-authkey" ]]; }
+needs_opencode_key() { [[ ! -f "$DATA/secrets.env" || $FORCE -eq 1 ]]; }
+needs_tailscale_key() { ! tailscale_registered && [[ ! -f "$DATA/tailscale-authkey" || $FORCE -eq 1 ]]; }
+
+make_dir() {
+  local dir=$1 mode=$2
+  if [[ -d "$dir" ]]; then
+    log skip "$dir exists"
+  else
+    mkdir -m "$mode" "$dir"
+    log ok "created $dir"
+  fi
+  chmod "$mode" "$dir"
+}
+
+install_unit() {
+  local src=$1 dest=$2
+  if cmp -s "$src" "$dest"; then
+    log skip "$(basename "$dest") is up to date"
+  else
+    cp "$src" "$dest"
+    log ok "installed $(basename "$dest")"
+  fi
+}
+
+# mktemp creates the file 0600, and the rename publishes it whole.
+write_private() {
+  local dest=$1 tmp
+  tmp=$(mktemp "$dest.XXXXXX")
+  printf '%s\n' "$2" >"$tmp"
+  mv "$tmp" "$dest"
+}
+
+cmd_needs() {
+  if needs_opencode_key; then echo opencode-api-key; fi
+  if needs_tailscale_key; then echo tailscale-authkey; fi
+}
+
+cmd_setup() {
+  local opencode_key="" tailscale_key=""
+  if [[ ! -t 0 ]]; then
+    IFS= read -r opencode_key || true
+    IFS= read -r tailscale_key || true
+  fi
+
+  local auth="$SANDBOX_SSHD/authorized_keys" key="$DATA/ssh/id_ed25519"
+  [[ -f "$SANDBOX_SSHD/ssh_host_ed25519_key.pub" && -f "$auth" ]] ||
+    die "the sandbox's sshd keys are missing from $SANDBOX_SSHD; start the sandbox once with: vinceworks sandbox up"
+  if needs_opencode_key && [[ -z "$opencode_key" ]]; then
+    die "secrets.env needs an OpenCode API key on stdin; run setup through: vinceworks caesar setup"
+  fi
+  if needs_tailscale_key && [[ -z "$tailscale_key" ]]; then
+    die "tailscale-authkey needs a Tailscale auth key on stdin; run setup through: vinceworks caesar setup"
+  fi
+
+  make_dir "$DATA" 700
+  make_dir "$DATA/ssh" 700
+  make_dir "$STATS" 755
+
+  mkdir -p "$UNIT_DIR" "$USER_UNIT_DIR"
+  install_unit "$VINCEWORKS/caesar/caesar.container" "$UNIT_DIR/$UNIT.container"
+  install_unit "$VINCEWORKS/caesar/host/caesar-host-snapshot.service" "$USER_UNIT_DIR/caesar-host-snapshot.service"
+  install_unit "$VINCEWORKS/caesar/host/caesar-host-snapshot.timer" "$USER_UNIT_DIR/caesar-host-snapshot.timer"
+  systemctl --user daemon-reload
+  systemctl --user cat "$UNIT.service" >/dev/null 2>&1 ||
+    die "$UNIT.service is missing after daemon-reload; run /usr/libexec/podman/quadlet -dryrun -user to see why"
+  systemctl --user --quiet enable --now caesar-host-snapshot.timer
+  if systemctl --user start caesar-host-snapshot.service; then
+    log ok "caesar-host-snapshot.timer is enabled and wrote $STATS/snapshot.json"
+  else
+    log warn "the first snapshot failed; see: journalctl --user -u caesar-host-snapshot"
+  fi
+
+  if [[ -f "$key" ]]; then
+    log skip "tunnel key exists"
+  else
+    ssh-keygen -q -t ed25519 -N '' -C "$TUNNEL_COMMENT" -f "$key"
+    log ok "generated the tunnel key"
+  fi
+
+  local blob line
+  blob=$(ssh-keygen -y -f "$key" | awk '{ print $2 }')
+  line="$TUNNEL_OPTIONS ssh-ed25519 $blob $TUNNEL_COMMENT"
+  if grep -qxF "$line" "$auth"; then
+    log skip "Caesar's key is in the sandbox's authorized_keys"
+  elif grep -qF "$blob" "$auth"; then
+    die "the sandbox's authorized_keys holds Caesar's key with other options; remove that line and re-run setup"
+  else
+    # A last line missing its newline would swallow the new key.
+    if [[ -n "$(tail -c1 "$auth")" ]]; then printf '\n' >>"$auth"; fi
+    printf '%s\n' "$line" >>"$auth"
+    log ok "added Caesar's key to the sandbox's authorized_keys"
+  fi
+
+  local hostkey
+  hostkey=$(awk '{ print $1, $2 }' "$SANDBOX_SSHD/ssh_host_ed25519_key.pub")
+  if [[ -f "$DATA/ssh/known_hosts" && "$(cat "$DATA/ssh/known_hosts")" == "vinceworks-sandbox $hostkey" ]]; then
+    log skip "known_hosts matches the sandbox's host key"
+  else
+    write_private "$DATA/ssh/known_hosts" "vinceworks-sandbox $hostkey"
+    log ok "wrote known_hosts from the sandbox's host key"
+  fi
+
+  if needs_opencode_key; then
+    write_private "$DATA/secrets.env" "OPENCODE_API_KEY=$opencode_key"
+    log ok "wrote secrets.env"
+  else
+    log skip "secrets.env exists (--force replaces it)"
+  fi
+
+  if tailscale_registered; then
+    log skip "Caesar is registered on the tailnet"
+  elif needs_tailscale_key; then
+    write_private "$DATA/tailscale-authkey" "$tailscale_key"
+    log ok "wrote tailscale-authkey for Caesar's first start"
+  else
+    log skip "tailscale-authkey is staged until Caesar registers (--force replaces it)"
+  fi
+}
+
+cmd_deploy() {
+  if [[ -t 0 ]]; then
+    die "deploy reads the caesar repo as a tar archive on stdin; run it through: vinceworks caesar deploy"
+  fi
+  [[ -f "$UNIT_DIR/$UNIT.container" && -d "$DATA" ]] ||
+    die "$UNIT.container or $DATA is missing; run: vinceworks caesar setup"
+
+  rm -rf "$SRC.new"
+  mkdir "$SRC.new"
+  tar -xf - -C "$SRC.new"
+  [[ -f "$SRC.new/Dockerfile" ]] || die "expected a Dockerfile at the top of the archive"
+
+  rm -rf "$SRC.old"
+  if [[ -d "$SRC" ]]; then mv "$SRC" "$SRC.old"; fi
+  mv "$SRC.new" "$SRC"
+  rm -rf "$SRC.old"
+  log ok "replaced $SRC"
+
+  podman build -t "$IMAGE" "$SRC"
+  log ok "$IMAGE"
+  systemctl --user daemon-reload
+  systemctl --user restart "$UNIT"
+  log ok "restarted $UNIT"
+}
+
+cmd_status() {
+  systemctl --user status "$UNIT" --no-pager || true
+  echo
+  podman exec "$UNIT" tailscale --socket=/data/tailscale/tailscaled.sock status ||
+    log warn "tailscale status failed inside the container"
+}
+
+cmd_logs() {
+  exec journalctl --user -u "$UNIT" -f
+}
+
+command=${1:-}
+[[ -n "$command" ]] || usage
+shift
+
+case "$command" in
+  needs) parse_force "$@"; cmd_needs ;;
+  setup) parse_force "$@"; cmd_setup ;;
+  deploy) cmd_deploy ;;
+  status) cmd_status ;;
+  logs) cmd_logs ;;
+  *) usage ;;
+esac

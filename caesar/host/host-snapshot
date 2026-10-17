@@ -1,0 +1,164 @@
+#!/usr/bin/env python3
+# Host snapshot for Caesar. caesar-host-snapshot.timer runs this every minute and it writes
+# ~/caesar-host-stats/snapshot.json, which the container reads as /host-stats/snapshot.json.
+# With --print the JSON goes to stdout instead. caesar/README.md describes the fields.
+import json
+import os
+import pwd
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime, timezone
+
+STATS_DIR = os.path.expanduser("~/caesar-host-stats")
+TOP = 10
+SAMPLE_SECONDS = 1
+CLOCK_TICKS = os.sysconf("SC_CLK_TCK")
+PAGE_SIZE = os.sysconf("SC_PAGE_SIZE")
+
+
+def memory():
+    kib = {}
+    with open("/proc/meminfo") as f:
+        for line in f:
+            name, rest = line.split(":", 1)
+            kib[name] = int(rest.split()[0])
+    return {
+        "total_bytes": kib["MemTotal"] * 1024,
+        "available_bytes": kib["MemAvailable"] * 1024,
+        "swap_total_bytes": kib["SwapTotal"] * 1024,
+        "swap_free_bytes": kib["SwapFree"] * 1024,
+    }
+
+
+def disk(path):
+    usage = shutil.disk_usage(path)
+    return {
+        "path": path,
+        "total_bytes": usage.total,
+        "used_bytes": usage.used,
+        "available_bytes": usage.free,
+    }
+
+
+def read_processes():
+    processes = {}
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        try:
+            with open(f"/proc/{entry}/stat", errors="replace") as f:
+                stat = f.read()
+        except OSError:
+            continue  # the process exited after it was listed
+        # The command name sits in parentheses and may itself contain spaces or parentheses.
+        close = stat.rindex(")")
+        fields = stat[close + 2 :].split()
+        processes[int(entry)] = {
+            "command": stat[stat.index("(") + 1 : close],
+            "cpu_ticks": int(fields[11]) + int(fields[12]),
+            "rss_bytes": int(fields[21]) * PAGE_SIZE,
+        }
+    return processes
+
+
+def owner(pid):
+    try:
+        uid = os.stat(f"/proc/{pid}").st_uid
+    except OSError:
+        return "?"
+    try:
+        return pwd.getpwuid(uid).pw_name
+    except KeyError:
+        return str(uid)
+
+
+def top_processes():
+    before = read_processes()
+    started = time.monotonic()
+    time.sleep(SAMPLE_SECONDS)
+    after = read_processes()
+    elapsed = time.monotonic() - started
+    after.pop(os.getpid(), None)  # leaves this script's own sampling out of the lists
+
+    rows = []
+    for pid, process in after.items():
+        earlier = before[pid]["cpu_ticks"] if pid in before else 0
+        used = (process["cpu_ticks"] - earlier) / CLOCK_TICKS
+        rows.append({
+            "pid": pid,
+            "command": process["command"],
+            "rss_bytes": process["rss_bytes"],
+            "cpu_percent": round(100 * used / elapsed, 1),
+        })
+
+    def listing(key):
+        top = sorted(rows, key=key, reverse=True)[:TOP]
+        return [
+            {
+                "pid": row["pid"],
+                "user": owner(row["pid"]),
+                "command": row["command"],
+                "rss_bytes": row["rss_bytes"],
+                "cpu_percent": row["cpu_percent"],
+            }
+            for row in top
+        ]
+
+    return (
+        listing(lambda row: (row["rss_bytes"], row["cpu_percent"])),
+        listing(lambda row: (row["cpu_percent"], row["rss_bytes"])),
+    )
+
+
+def containers():
+    try:
+        result = subprocess.run(
+            ["podman", "stats", "--no-stream", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout) if result.stdout.strip() else []
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+
+
+def snapshot():
+    with open("/proc/loadavg") as f:
+        load = [float(value) for value in f.read().split()[:3]]
+    with open("/proc/uptime") as f:
+        uptime = float(f.read().split()[0])
+    by_rss, by_cpu = top_processes()
+    return {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "uptime_seconds": int(uptime),
+        "cpu_count": os.cpu_count(),
+        "load_average": {"1m": load[0], "5m": load[1], "15m": load[2]},
+        "memory": memory(),
+        "disk": [disk("/"), disk("/home")],
+        "top_by_rss": by_rss,
+        "top_by_cpu": by_cpu,
+        "containers": containers(),
+    }
+
+
+def main():
+    if sys.argv[1:] not in ([], ["--print"]):
+        sys.exit("usage: host-snapshot [--print]")
+    text = json.dumps(snapshot(), indent=2) + "\n"
+    if sys.argv[1:] == ["--print"]:
+        sys.stdout.write(text)
+        return
+    os.makedirs(STATS_DIR, exist_ok=True)
+    path = os.path.join(STATS_DIR, "snapshot.json")
+    with open(path + ".tmp", "w") as f:
+        f.write(text)
+    os.replace(path + ".tmp", path)
+
+
+if __name__ == "__main__":
+    main()

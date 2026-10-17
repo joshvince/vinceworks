@@ -1,0 +1,21 @@
+[Unit]
+Description=Caesar, the orchestrator agent
+
+[Container]
+Image=localhost/caesar:latest
+ContainerName=caesar
+HostName=caesar
+UserNS=keep-id:uid=1000,gid=1000
+RunInit=yes
+Volume=/home/josh/caesar-data:/data
+# Rewritten every minute by caesar-host-snapshot.timer.
+Volume=/home/josh/caesar-host-stats:/host-stats:ro
+Environment=CAESAR_DATA_DIR=/data
+PodmanArgs=--memory 1g --cpus 1
+# Caesar is reached as his own device on the tailnet, from inside the container.
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

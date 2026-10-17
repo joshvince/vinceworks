@@ -1,0 +1,8 @@
+[Unit]
+Description=Caesar host snapshot
+
+[Service]
+Type=oneshot
+ExecStart=%h/vinceworks/caesar/host/host-snapshot
+# Ends a hung run, which would otherwise hold back every later one.
+TimeoutStartSec=30

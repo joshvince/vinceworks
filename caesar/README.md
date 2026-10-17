@@ -6,7 +6,7 @@ Caesar is a persistent orchestrator agent. He runs on the home server beside the
 
 - Caesar runs in his own rootless podman container, a systemd user quadlet ([`caesar.container`](caesar.container)) beside `vinceworks-sandbox` rather than inside it. His credentials and memory sit out of the coding agents' reach, and he stays up through sandbox restarts.
 - He joins the tailnet from inside the container as his own device, tagged `tag:caesar`. The tailnet policy grants my Mac and iPhones port 443 on that tag, and that is how he is reached.
-- He reaches the Paseo daemon in the sandbox through an SSH tunnel to the sandbox's sshd on port 2222. The tunnel key is generated on the host, and its entry in the sandbox's `authorized_keys` limits local port forwards to `127.0.0.1:6767`.
+- He reaches the Paseo daemon in the sandbox through an SSH tunnel to the sandbox's sshd on port 2222. The tunnel key is generated on the host. Its entry in the sandbox's `authorized_keys` allows local port forwards to `127.0.0.1:6767` and nothing else: `permitopen` pins the destination and the forced command `/bin/false` ends any session that asks for a shell.
 - He sees the host through a snapshot. A systemd user timer writes `~/caesar-host-stats/snapshot.json` every minute, and the container reads it from `/host-stats`.
 - The source reaches the box as a `git archive` streamed over SSH from the Mac, and the image is built there.
 
@@ -57,7 +57,7 @@ The policy grants access to named devices. The box is registered as one of my ow
 
 - creates `~/caesar-data` (0700), `~/caesar-data/ssh` (0700) and `~/caesar-host-stats`;
 - installs the quadlet into `~/.config/containers/systemd` and the snapshot units into `~/.config/systemd/user`, then enables the snapshot timer;
-- generates the tunnel key if it is missing, and appends it to the sandbox's `authorized_keys` as `restrict,port-forwarding,permitopen="127.0.0.1:6767" ssh-ed25519 <key> vinceworks:caesar-tunnel`;
+- generates the tunnel key if it is missing, and appends it to the sandbox's `authorized_keys` as `restrict,port-forwarding,permitopen="127.0.0.1:6767",command="/bin/false" ssh-ed25519 <key> vinceworks:caesar-tunnel`;
 - writes `known_hosts` from the sandbox sshd's host key;
 - writes `secrets.env` from the Mac's `$OPENCODE_API_KEY` when the file is missing or with `--force`;
 - asks on the Mac for the Tailscale auth key (a silent prompt) while Caesar is unregistered, and stages it as `tailscale-authkey`. Secrets travel on ssh's stdin, so they stay out of the process lists on both machines.

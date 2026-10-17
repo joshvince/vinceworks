@@ -14,7 +14,7 @@ STATS="$HOME/caesar-host-stats"
 SRC="$HOME/caesar-src"
 SANDBOX_SSHD="$HOME/vinceworks-sandbox/.ssh/sshd"
 TUNNEL_COMMENT=vinceworks:caesar-tunnel
-TUNNEL_OPTIONS='restrict,port-forwarding,permitopen="127.0.0.1:6767"'
+TUNNEL_OPTIONS='restrict,port-forwarding,permitopen="127.0.0.1:6767",command="/bin/false"'
 FORCE=0
 
 log() { printf '  [%s] %s\n' "$1" "$2"; }

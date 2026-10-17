@@ -7,6 +7,7 @@ The repo now houses a broad CLI-esque program that I can use to:
 - setup a new or sync dev machines with my preferred dev tool settings, including terminals, AI harnesses etc
 - maintain 'agent definitions' or system prompts I use when writing code with AI
 - run a 'remote' sandbox on my home server that gives agents a sandboxed environment to do the heavy lifting on my own projects
+- run Caesar, a persistent orchestrator agent, beside the sandbox on the same server
 
 
 ## Commands
@@ -52,6 +53,11 @@ To add a new shared skill, drop a `<skill-name>/SKILL.md` directory into `ai/ski
 
 ### `vinceworks sandbox`
 A remote dev environment on the home Ubuntu box where agents can work with high autonomy on personal projects, reachable from the Mac or phone from anywhere. See [sandbox/README.md](sandbox/README.md).
+
+---
+
+### `vinceworks caesar`
+Caesar, a persistent orchestrator agent that runs in his own container beside the sandbox, watches the coding agents there and starts sessions for me. His code lives in a separate repo; this repo holds what runs him, and `vinceworks caesar setup`, `deploy`, `status` and `logs` manage it. See [caesar/README.md](caesar/README.md).
 
 ---
 
